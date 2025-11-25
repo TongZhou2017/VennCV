@@ -1,0 +1,8 @@
+auto_save: false
+auto_save_interval: 300
+default_zoom: 0.9
+max_history_size: 50
+show_project_numbers: true
+show_project_names: true
+field_border_width: 3.0
+project_border_width: 3.0

@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 数据文件（可选，根据需要调整）
+*.json
+
+# 用户配置文件（包含用户信息）
+config.yaml
+
+# 开发文档（不用于git和cargo发布）
+DEVELOPMENT_NOTES.md
+VERSION_HISTORY.md
+CHAT_REQUIREMENTS.md
