@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 /// 项目状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +141,8 @@ pub struct AppSettings {
     pub project_border_width: f32,  // 项目边框宽度
     #[serde(default = "default_visualization_bg_color")]
     pub visualization_bg_color: [u8; 4],  // 可视化背景颜色 RGBA
+    #[serde(default = "default_show_legend")]
+    pub show_legend: bool,  // 是否显示图例
 }
 
 fn default_auto_save() -> bool { false }
@@ -152,6 +154,7 @@ fn default_show_project_names() -> bool { true }
 fn default_field_border_width() -> f32 { 2.0 }
 fn default_project_border_width() -> f32 { 3.0 }
 fn default_visualization_bg_color() -> [u8; 4] { [255, 255, 255, 255] }  // 白色
+fn default_show_legend() -> bool { true }
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -165,6 +168,7 @@ impl Default for AppSettings {
             field_border_width: 2.0,
             project_border_width: 3.0,
             visualization_bg_color: [255, 255, 255, 255],
+            show_legend: true,
         }
     }
 }
@@ -172,8 +176,8 @@ impl Default for AppSettings {
 /// 应用数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppData {
-    pub fields: HashMap<String, ResearchField>,
-    pub projects: HashMap<String, Project>,
+    pub fields: IndexMap<String, ResearchField>,  // 使用IndexMap保持领域顺序
+    pub projects: IndexMap<String, Project>,  // 使用IndexMap保持插入顺序
     pub relations: Vec<ProjectRelation>,
     #[serde(default)]
     pub relation_tags: Vec<String>,  // 关系标签列表（全局标签库）
@@ -181,8 +185,8 @@ pub struct AppData {
 
 impl Default for AppData {
     fn default() -> Self {
-        let mut fields = HashMap::new();
-        let mut projects = HashMap::new();
+        let mut fields = IndexMap::new();
+        let mut projects = IndexMap::new();
         let mut relations = Vec::new();
 
         // 初始化三个研究方向
@@ -257,8 +261,8 @@ impl AppData {
     pub fn default_empty() -> Self {
         // 新用户不提供任何领域信息
         Self {
-            fields: HashMap::new(),
-            projects: HashMap::new(),
+            fields: IndexMap::new(),
+            projects: IndexMap::new(),
             relations: Vec::new(),
             relation_tags: Vec::new(),
         }

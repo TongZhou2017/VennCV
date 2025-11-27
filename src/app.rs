@@ -127,6 +127,9 @@ impl Theme {
         // 交互
         style.interaction.resize_grab_radius_side = 6.0;
         
+        // 禁用Tab键的默认焦点导航，由应用自行处理
+        style.interaction.selectable_labels = false;
+        
         // 整体视觉
         style.visuals.override_text_color = Some(self.text_primary);
         style.visuals.faint_bg_color = self.surface;
@@ -175,6 +178,27 @@ pub struct VennCVApp {
     // 设置
     pub show_settings_dialog: bool,  // 是否显示设置对话框
     pub settings: AppSettings,  // 应用设置
+    
+    // 图例状态
+    pub legend_position: Vec2,  // 图例位置（相对于可视化区域右上角的偏移）
+    pub legend_dragging: bool,  // 是否正在拖拽图例
+    pub show_legend_settings: bool,  // 是否显示图例设置对话框
+    
+    // 项目拖拽状态
+    pub dragging_project: Option<String>,  // 正在拖拽的项目ID
+    
+    // 领域列表拖拽状态
+    pub dragging_field_idx: Option<usize>,  // 正在拖拽的领域索引
+    pub field_drag_target_idx: Option<usize>,  // 拖拽目标位置
+    
+    // 面板宽度状态
+    pub property_panel_width: f32,  // 属性面板宽度
+    
+    // 左边栏领域区域高度
+    pub field_section_height: f32,  // 领域区域高度
+    
+    // 工具栏按钮选中状态
+    pub toolbar_focus_index: Option<usize>,  // 当前选中的工具栏按钮索引
 }
 
 impl Default for VennCVApp {
@@ -209,6 +233,15 @@ impl Default for VennCVApp {
             relation_tag_inputs: std::collections::HashMap::new(),
             show_settings_dialog: false,
             settings: AppSettings::default(),
+            legend_position: Vec2::ZERO,  // 默认在右上角
+            legend_dragging: false,
+            dragging_project: None,
+            dragging_field_idx: None,
+            field_drag_target_idx: None,
+            property_panel_width: 250.0,  // 默认宽度
+            show_legend_settings: false,
+            field_section_height: 100.0,  // 领域区域默认高度
+            toolbar_focus_index: None,  // 工具栏按钮无选中
         }
     }
 }
@@ -416,10 +449,13 @@ impl VennCVApp {
                         }
 
                         ui.add_space(24.0);
+                        
+                        // 回车键触发登录
+                        let enter_pressed = ctx.input(|i| i.key_pressed(Key::Enter));
 
                         // 按钮组 - 更简洁的样式
                         ui.horizontal(|ui| {
-                            if ui.add_sized(
+                            if enter_pressed || ui.add_sized(
                                 [ui.available_width() / 2.0 - 4.0, 32.0],
                                 Button::new(RichText::new("登录").size(13.0).color(Color32::WHITE))
                                     .fill(theme.primary)
@@ -445,8 +481,10 @@ impl VennCVApp {
                                                                 self.current_file_path = Some(path);
                                                                 self.selected_project = None;
                                                                 self.editing_project = None;
-                                                                // 重置历史
-                                                                self.history = vec![data];
+                                                                // 验证并修正项目位置
+                                                                self.validate_and_fix_project_positions();
+                                                                // 重置历史（使用修正后的数据）
+                                                                self.history = vec![self.data.clone()];
                                                                 self.history_index = 0;
                                                             }
                                                             Err(e) => {
@@ -617,33 +655,36 @@ impl VennCVApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = vec2(4.0, 0.0);
                     
-                    // 新建项目按钮（使用图标）
+                    // 工具栏按钮选中高亮色
+                    let focus_fill = theme.primary;
+                    
+                    // 新建项目按钮（使用图标）- 索引0
                     let new_btn = ui.add_sized(
                         [32.0, 28.0],
                         Button::new(
                             RichText::new("➕")
                                 .size(14.0)
                         )
-                        .fill(theme.surface)
+                        .fill(if self.toolbar_focus_index == Some(0) { focus_fill } else { theme.surface })
                     );
                     if new_btn.clicked() {
                         self.create_new_project_shortcut();
                     }
                     new_btn.on_hover_text("新建项目 (Ctrl+N)");
                     
-                    // 删除项目按钮（使用图标）
+                    // 删除项目按钮（使用图标）- 索引1
                     let delete_btn = ui.add_sized(
                         [32.0, 28.0],
                         Button::new(
                             RichText::new("🗑")
                                 .size(14.0)
                         )
-                        .fill(theme.surface)
+                        .fill(if self.toolbar_focus_index == Some(1) { focus_fill } else { theme.surface })
                     );
                     if delete_btn.clicked() {
                         if let Some(id) = &self.selected_project {
                             // 删除项目
-                            self.data.projects.remove(id);
+                            self.data.projects.shift_remove(id);
                             // 删除相关关系
                             self.data.relations.retain(|r| r.from_id != *id && r.to_id != *id);
                             // 清除选中状态
@@ -657,14 +698,14 @@ impl VennCVApp {
                     
                     ui.separator();
                     
-                    // 保存按钮（使用图标）
+                    // 保存按钮（使用图标）- 索引2
                     let save_btn = ui.add_sized(
                         [32.0, 28.0],
                         Button::new(
                             RichText::new("💾")
                                 .size(14.0)
                         )
-                        .fill(theme.primary)
+                        .fill(if self.toolbar_focus_index == Some(2) { focus_fill } else { theme.surface })
                     );
                     if save_btn.clicked() {
                         self.save_data();
@@ -673,28 +714,28 @@ impl VennCVApp {
                     
                     ui.separator();
                     
-                    // 撤销按钮（使用文本图标）
+                    // 撤销按钮（使用文本图标）- 索引3
                     let undo_btn = ui.add_sized(
                         [50.0, 28.0],
                         Button::new(
                             RichText::new("↩")
                                 .size(14.0)
                         )
-                        .fill(theme.surface)
+                        .fill(if self.toolbar_focus_index == Some(3) { focus_fill } else { theme.surface })
                     );
                     if undo_btn.clicked() {
                         self.undo();
                     }
                     undo_btn.on_hover_text("撤销 (Ctrl+Z)");
                     
-                    // 重做按钮（使用文本图标）
+                    // 重做按钮（使用文本图标）- 索引4
                     let redo_btn = ui.add_sized(
                         [50.0, 28.0],
                         Button::new(
                             RichText::new("↪")
                                 .size(14.0)
                         )
-                        .fill(theme.surface)
+                        .fill(if self.toolbar_focus_index == Some(4) { focus_fill } else { theme.surface })
                     );
                     if redo_btn.clicked() {
                         self.redo();
@@ -703,29 +744,72 @@ impl VennCVApp {
                     
                     ui.separator();
                     
-                    // 重新布局按钮（使用文本图标）
+                    // 重新布局按钮（使用文本图标）- 索引5
                     let relayout_btn = ui.add_sized(
                         [50.0, 28.0],
                         Button::new(
                             RichText::new("⟳")
                                 .size(14.0)
                         )
-                        .fill(theme.surface)
+                        .fill(if self.toolbar_focus_index == Some(5) { focus_fill } else { theme.surface })
                     );
                     if relayout_btn.clicked() {
+                        // 只修正位置不正确的项目
+                        self.validate_and_fix_project_positions();
+                        // 更新编辑中的项目位置
                         if let Some(id) = &self.selected_project {
                             if let Some(project) = self.data.projects.get(id) {
-                                let new_position = self.calculate_project_position(project);
-                                if let Some(p) = self.data.projects.get_mut(id) {
-                                    p.position = new_position;
-                                }
                                 if let Some(editing) = &mut self.editing_project {
-                                    editing.position = new_position;
+                                    editing.position = project.position;
                                 }
                             }
                         }
                     }
-                    relayout_btn.on_hover_text("重新布局");
+                    relayout_btn.on_hover_text("重新布局（修正位置不正确的项目）");
+                    
+                    ui.separator();
+                    
+                    // 放大按钮 - 索引6
+                    let zoom_in_btn = ui.add_sized(
+                        [32.0, 28.0],
+                        Button::new(
+                            RichText::new("🔍+")
+                                .size(12.0)
+                        )
+                        .fill(if self.toolbar_focus_index == Some(6) { focus_fill } else { theme.surface })
+                    );
+                    if zoom_in_btn.clicked() {
+                        self.zoom_in();
+                    }
+                    zoom_in_btn.on_hover_text("放大");
+                    
+                    // 缩小按钮 - 索引7
+                    let zoom_out_btn = ui.add_sized(
+                        [32.0, 28.0],
+                        Button::new(
+                            RichText::new("🔍-")
+                                .size(12.0)
+                        )
+                        .fill(if self.toolbar_focus_index == Some(7) { focus_fill } else { theme.surface })
+                    );
+                    if zoom_out_btn.clicked() {
+                        self.zoom_out();
+                    }
+                    zoom_out_btn.on_hover_text("缩小");
+                    
+                    // 重置缩放按钮 - 索引8
+                    let zoom_reset_btn = ui.add_sized(
+                        [32.0, 28.0],
+                        Button::new(
+                            RichText::new("⊙")
+                                .size(14.0)
+                        )
+                        .fill(if self.toolbar_focus_index == Some(8) { focus_fill } else { theme.surface })
+                    );
+                    if zoom_reset_btn.clicked() {
+                        self.zoom_reset();
+                    }
+                    zoom_reset_btn.on_hover_text("重置缩放");
                 });
             });
 
@@ -734,17 +818,277 @@ impl VennCVApp {
             SidePanel::left("project_table")
                 .resizable(true)
                 .default_width(200.0)
+                .width_range(150.0..=400.0)
                 .frame(Frame::side_top_panel(&ctx.style()).fill(theme.surface).stroke(Stroke::new(1.0, theme.divider)))
                 .show(ctx, |ui| {
-                    // 标题栏 - VSCode风格
+                    // === 领域管理区域（可折叠） ===
+                    // 限制领域区域高度在20到200之间
+                    let field_height = self.field_section_height.clamp(20.0, 200.0);
+                    
+                    // 领域区域容器
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), field_height),
+                        Layout::top_down(Align::LEFT),
+                        |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("领域")
+                                        .size(11.0)
+                                        .color(theme.text_secondary)
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if ui.small_button("+").clicked() {
+                                        let new_id = format!("field_{}", self.data.fields.len() + 1);
+                                        let new_field = ResearchField {
+                                            id: new_id.clone(),
+                                            name: "新领域".to_string(),
+                                            description: String::new(),
+                                            position: (400.0, 400.0),
+                                            radius: 200.0,
+                                        };
+                                        self.data.fields.insert(new_id, new_field);
+                                        self.save_to_history();
+                                    }
+                                });
+                            });
+                            ui.add_space(4.0);
+                            
+                            // 领域列表滚动区域
+                            let field_ids_left: Vec<String> = self.data.fields.keys().cloned().collect();
+                            let mut fields_to_remove_left: Vec<String> = Vec::new();
+                            let mut fields_to_update_left: HashMap<String, String> = HashMap::new();
+                            let mut field_reorder: Option<(usize, usize)> = None;  // (from, to)
+                            
+                            ScrollArea::vertical()
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    for (idx, field_id) in field_ids_left.iter().enumerate() {
+                                        if let Some(field) = self.data.fields.get(field_id) {
+                                            let item_rect = ui.available_rect_before_wrap();
+                                            let item_height = 24.0;
+                                            let item_rect = Rect::from_min_size(
+                                                item_rect.min,
+                                                vec2(item_rect.width(), item_height)
+                                            );
+                                            
+                                            // 绘制拖拽目标指示线
+                                            if let Some(target_idx) = self.field_drag_target_idx {
+                                                if target_idx == idx {
+                                                    ui.painter().rect_filled(
+                                                        Rect::from_min_size(
+                                                            pos2(item_rect.min.x, item_rect.min.y - 1.0),
+                                                            vec2(item_rect.width(), 2.0)
+                                                        ),
+                                                        0.0,
+                                                        Color32::from_rgb(0, 122, 204)
+                                                    );
+                                                }
+                                            }
+                                            
+                                            // 绘制拖拽中的背景
+                                            let is_dragging = self.dragging_field_idx == Some(idx);
+                                            if is_dragging {
+                                                ui.painter().rect_filled(
+                                                    item_rect,
+                                                    Rounding::same(2.0),
+                                                    theme.selection,
+                                                );
+                                            }
+                                            
+                                            let _response = ui.allocate_ui_at_rect(item_rect, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    // 行号
+                                                    ui.label(
+                                                        RichText::new(format!("{:2}.", idx + 1))
+                                                            .size(11.0)
+                                                            .color(theme.text_secondary)
+                                                            .monospace()
+                                                    );
+                                                    
+                                                    let input_width = (ui.available_width() - 55.0).max(40.0);
+                                                    
+                                                    let mut field_name = field.name.clone();
+                                                    let name_response = ui.add(
+                                                        TextEdit::singleline(&mut field_name)
+                                                            .desired_width(input_width)
+                                                    );
+                                                    if name_response.changed() {
+                                                        fields_to_update_left.insert(field_id.clone(), field_name);
+                                                    }
+                                                    
+                                                    if ui.small_button("×").clicked() {
+                                                        fields_to_remove_left.push(field_id.clone());
+                                                    }
+                                                });
+                                            });
+                                            
+                                            // 处理拖拽
+                                            let drag_response = ui.interact(item_rect, ui.id().with(("field_drag", idx)), Sense::drag());
+                                            
+                                            if drag_response.drag_started() {
+                                                self.dragging_field_idx = Some(idx);
+                                            }
+                                            
+                                            if drag_response.dragged() && self.dragging_field_idx.is_some() {
+                                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                                            }
+                                            
+                                            // 检测拖拽目标位置
+                                            if self.dragging_field_idx.is_some() {
+                                                if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                                                    if item_rect.contains(pointer_pos) {
+                                                        let relative_y = pointer_pos.y - item_rect.min.y;
+                                                        if relative_y < item_height / 2.0 {
+                                                            self.field_drag_target_idx = Some(idx);
+                                                        } else {
+                                                            self.field_drag_target_idx = Some(idx + 1);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if drag_response.drag_stopped() {
+                                                if let (Some(from_idx), Some(to_idx)) = (self.dragging_field_idx, self.field_drag_target_idx) {
+                                                    if from_idx != to_idx && from_idx + 1 != to_idx {
+                                                        field_reorder = Some((from_idx, to_idx));
+                                                    }
+                                                }
+                                                self.dragging_field_idx = None;
+                                                self.field_drag_target_idx = None;
+                                            }
+                                            
+                                            ui.add_space(2.0);
+                                        }
+                                    }
+                                    
+                                    // 在最后一个项目后绘制拖拽目标线
+                                    if let Some(target_idx) = self.field_drag_target_idx {
+                                        if target_idx == field_ids_left.len() {
+                                            let rect = ui.available_rect_before_wrap();
+                                            ui.painter().rect_filled(
+                                                Rect::from_min_size(
+                                                    pos2(rect.min.x, rect.min.y - 1.0),
+                                                    vec2(rect.width(), 2.0)
+                                                ),
+                                                0.0,
+                                                Color32::from_rgb(0, 122, 204)
+                                            );
+                                        }
+                                    }
+                                });
+                            
+                            // 处理领域重排序
+                            if let Some((from_idx, to_idx)) = field_reorder {
+                                // 获取所有键值对
+                                let entries: Vec<_> = self.data.fields.drain(..).collect();
+                                let mut new_entries = Vec::with_capacity(entries.len());
+                                
+                                // 重新排列
+                                let actual_to = if to_idx > from_idx { to_idx - 1 } else { to_idx };
+                                for (i, entry) in entries.iter().enumerate() {
+                                    if i == from_idx {
+                                        continue;
+                                    }
+                                    if i == actual_to && to_idx <= from_idx {
+                                        new_entries.push(entries[from_idx].clone());
+                                    }
+                                    new_entries.push(entry.clone());
+                                    if i == actual_to && to_idx > from_idx {
+                                        new_entries.push(entries[from_idx].clone());
+                                    }
+                                }
+                                if actual_to >= entries.len() - 1 && to_idx > from_idx {
+                                    new_entries.push(entries[from_idx].clone());
+                                }
+                                if new_entries.len() < entries.len() {
+                                    // 如果移动到最后
+                                    new_entries.push(entries[from_idx].clone());
+                                }
+                                
+                                // 重建IndexMap
+                                for (k, v) in new_entries {
+                                    self.data.fields.insert(k, v);
+                                }
+                                // 重新计算领域布局
+                                self.adjust_field_layout();
+                                // 重新计算所有项目位置（领域位置变了），加入随机抖动避免重叠
+                                self.recalculate_all_project_positions_with_jitter();
+                                // 二次检验并修正重叠
+                                self.validate_and_fix_project_positions();
+                                self.save_to_history();
+                            }
+                            
+                            // 更新领域名称
+                            if !fields_to_update_left.is_empty() {
+                                for (fid, new_name) in fields_to_update_left {
+                                    if let Some(f) = self.data.fields.get_mut(&fid) {
+                                        f.name = new_name;
+                                    }
+                                }
+                                self.save_to_history();
+                            }
+                            
+                            // 删除领域
+                            if !fields_to_remove_left.is_empty() {
+                                for fid in fields_to_remove_left {
+                                    for project in self.data.projects.values_mut() {
+                                        project.field_ids.retain(|id| id != &fid);
+                                    }
+                                    self.data.fields.remove(&fid);
+                                }
+                                self.save_to_history();
+                            }
+                        }
+                    );
+                    
+                    // 可拖拽的分隔线
+                    let separator_rect = ui.available_rect_before_wrap();
+                    let separator_rect = Rect::from_min_size(
+                        separator_rect.min,
+                        vec2(separator_rect.width(), 8.0)
+                    );
+                    
+                    let separator_response = ui.allocate_rect(separator_rect, Sense::drag());
+                    
+                    // 绘制分隔线（拖拽时高亮）
+                    let separator_color = if separator_response.hovered() || separator_response.dragged() {
+                        Color32::from_rgb(100, 150, 255)
+                    } else {
+                        theme.divider
+                    };
+                    ui.painter().rect_filled(
+                        Rect::from_min_size(
+                            pos2(separator_rect.min.x, separator_rect.center().y - 1.0),
+                            vec2(separator_rect.width(), 2.0)
+                        ),
+                        0.0,
+                        separator_color
+                    );
+                    
+                    // 处理拖拽
+                    if separator_response.dragged() {
+                        self.field_section_height += separator_response.drag_delta().y;
+                        self.field_section_height = self.field_section_height.clamp(20.0, 200.0);
+                    }
+                    
+                    // 改变鼠标光标
+                    if separator_response.hovered() || separator_response.dragged() {
+                        ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    }
+                    
+                    ui.add_space(4.0);
+                    
+                    // === 项目列表区域（中间） ===
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new("项目")
                                 .size(11.0)
                                 .color(theme.text_secondary)
                         );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |_ui| {
-                            // 可以添加操作按钮
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.small_button("+").clicked() {
+                                self.create_new_project_shortcut();
+                            }
                         });
                     });
                     ui.add_space(4.0);
@@ -755,7 +1099,7 @@ impl VennCVApp {
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             // 显示项目列表 - VSCode文件树风格
-                            for (id, project) in &self.data.projects {
+                            for (idx, (id, project)) in self.data.projects.iter().enumerate() {
                                 let is_selected = self.selected_project.as_ref() == Some(id);
                                 
                                 // 绘制背景
@@ -780,9 +1124,16 @@ impl VennCVApp {
                                     );
                                 }
                                 
-                                // 项目名称
+                                // 项目名称（带行号）
                                 let response = ui.allocate_ui_at_rect(item_rect, |ui| {
                                     ui.horizontal(|ui| {
+                                        // 行号
+                                        ui.label(
+                                            RichText::new(format!("{:2}.", idx + 1))
+                                                .size(11.0)
+                                                .color(theme.text_secondary)
+                                                .monospace()
+                                        );
                                         ui.label(
                                             RichText::new(&project.name)
                                                 .size(13.0)
@@ -807,40 +1158,20 @@ impl VennCVApp {
                                 }
                             }
                         });
-
-                    ui.add_space(4.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    // 添加按钮 - 更简洁
-                    if ui.add_sized(
-                        [ui.available_width(), 28.0],
-                        Button::new(
-                            RichText::new("+ 添加项目")
-                                .size(12.0)
-                                .color(theme.text_primary)
-                        )
-                        .fill(theme.surface)
-                    ).clicked() {
-                        self.create_new_project_shortcut();
-                    }
                 });
         }
 
         // 右侧属性编辑面板 - VSCode风格
         // 注意：属性面板在可视化面板之后渲染，确保左边界贴着可视化面板
         if self.show_property_panel {
-            SidePanel::right("property_panel")
+            let panel_response = SidePanel::right("property_panel")
                 .resizable(true)
-                .default_width(250.0)
-                .min_width(200.0)
-                .max_width(400.0)
+                .default_width(self.property_panel_width)
+                .width_range(200.0..=400.0)
                 .frame(Frame::side_top_panel(&ctx.style()).fill(theme.surface).stroke(Stroke::new(1.0, theme.divider)))
                 .show(ctx, |ui| {
-                    // 严格限制整个面板的宽度，防止内容扩展导致面板变宽
-                    let panel_width = ui.available_width();
-                    ui.set_width(panel_width);
-                    ui.set_max_width(panel_width);
-                    
+                    // 记录当前面板宽度
+                    self.property_panel_width = ui.available_width();
                     // 标题栏
                     ui.horizontal(|ui| {
                         ui.label(
@@ -861,10 +1192,6 @@ impl VennCVApp {
                         ScrollArea::vertical()
                             .auto_shrink([false; 2])
                             .show(ui, |ui| {
-                                // 严格限制宽度，防止内容扩展导致面板变宽
-                                let available_width = ui.available_width();
-                                ui.set_width(available_width);
-                                ui.set_max_width(available_width);
                                 ui.vertical(|ui| {
                                     ui.label(
                                         RichText::new("项目属性")
@@ -914,7 +1241,7 @@ impl VennCVApp {
                                         let mut status_changed = false;
                                         ComboBox::from_id_source("status")
                                             .selected_text(project_mut.status.name())
-                                            .width(ui.available_width())
+                                            .width(150.0) // 固定宽度
                                             .show_ui(ui, |ui| {
                                         if ui.selectable_value(
                                             &mut project_mut.status,
@@ -1022,7 +1349,7 @@ impl VennCVApp {
                                         }
                                     });
                                     
-                                    // 勾选领域后自动更新项目位置
+                                    // 勾选领域后自动更新项目位置并解决重叠
                                     if field_changed {
                                         if let Some(id) = &selected_project_id {
                                             let new_position = self.calculate_project_position(&project_mut);
@@ -1033,8 +1360,13 @@ impl VennCVApp {
                                             if let Some(p) = self.data.projects.get_mut(id) {
                                                 p.position = new_position;
                                             }
-                                            // 保存到历史
-                                            self.save_to_history();
+                                            // 自动验证并修正所有项目位置（物理引擎）
+                                            self.validate_and_fix_project_positions();
+                                            // 更新编辑中的项目位置（可能被物理引擎调整）
+                                            if let Some(p) = self.data.projects.get(id) {
+                                                project_mut.position = p.position;
+                                                self.editing_project = Some(project_mut.clone());
+                                            }
                                         }
                                     }
 
@@ -1073,10 +1405,6 @@ impl VennCVApp {
                                     
                                     // 使用滚动区域显示关系列表
                                     ScrollArea::vertical().show(ui, |ui| {
-                                        // 严格限制宽度，防止内容扩展导致面板变宽
-                                        let available_width = ui.available_width();
-                                        ui.set_width(available_width);
-                                        ui.set_max_width(available_width);
                             // 显示关系编辑界面
                             let mut needs_save_after = false;
                             for (idx, from_name, to_name, is_outgoing) in relation_info {
@@ -1084,11 +1412,7 @@ impl VennCVApp {
                                     let is_expanded = self.expanded_relations.get(&idx).copied().unwrap_or(false);
                                     
                                     // 关系标题行（折叠状态）
-                                    let available_width = ui.available_width();
                                     ui.horizontal(|ui| {
-                                        // 严格限制水平布局的宽度
-                                        ui.set_width(available_width);
-                                        ui.set_max_width(available_width);
                                         // 展开/折叠按钮
                                         let expand_text = if is_expanded { "▼" } else { "▶" };
                                         if ui.button(expand_text).clicked() {
@@ -1113,17 +1437,19 @@ impl VennCVApp {
                                         // 使用label并限制宽度
                                         ui.label(truncated_text);
                                         
-                                        // 显示标签
+                                        // 显示标签（紧凑显示，不撑开面板）
                                         if !relation.tags.is_empty() {
-                                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                                for tag in &relation.tags {
-                                                    ui.label(
-                                                        RichText::new(tag)
-                                                            .background_color(Color32::from_rgb(200, 200, 200))
-                                                    );
-                                                    ui.add_space(2.0);
-                                                }
-                                            });
+                                            // 只显示第一个标签，紧跟在方向文字后面
+                                            if let Some(first_tag) = relation.tags.first() {
+                                                ui.label(
+                                                    RichText::new(first_tag)
+                                                        .size(10.0)
+                                                        .background_color(Color32::from_rgb(200, 200, 200))
+                                                );
+                                            }
+                                            if relation.tags.len() > 1 {
+                                                ui.label(RichText::new(format!("+{}", relation.tags.len() - 1)).size(10.0));
+                                            }
                                         }
                                         
                                         // 删除按钮
@@ -1135,10 +1461,6 @@ impl VennCVApp {
                                     // 展开的详细设置
                                     if is_expanded {
                                         ui.group(|ui| {
-                                            // 严格限制group的宽度
-                                            let available_width = ui.available_width();
-                                            ui.set_width(available_width);
-                                            ui.set_max_width(available_width);
                                             ui.add_space(5.0);
                                             
                                             // 目标项目选择（仅当是出向关系时）
@@ -1149,7 +1471,7 @@ impl VennCVApp {
                                                     ui.label("目标项目: ");
                                                     ComboBox::from_id_source(format!("to_project_{}", idx))
                                                         .selected_text(to_name)
-                                                        .width(ui.available_width() - 80.0) // 限制宽度
+                                                        .width(120.0) // 固定宽度
                                                         .show_ui(ui, |ui| {
                                                             for (id, proj) in &self.data.projects {
                                                                 if *id != relation.from_id {
@@ -1243,6 +1565,7 @@ impl VennCVApp {
                                             ui.label("代表意义（标签）: ");
                                             let mut tags_to_remove = Vec::new();
                                             ui.horizontal_wrapped(|ui| {
+                                                ui.set_max_width(200.0); // 固定最大宽度
                                                 // 显示已有标签
                                                 for (tag_idx, tag) in relation.tags.iter().enumerate() {
                                                     if ui.small_button(format!("{} ✕", tag)).clicked() {
@@ -1267,7 +1590,7 @@ impl VennCVApp {
                                                 let response = ui.add(
                                                     TextEdit::singleline(tag_input)
                                                         .hint_text("输入标签名或选择现有标签...")
-                                                        .desired_width(ui.available_width() - 80.0) // 限制宽度
+                                                        .desired_width(80.0) // 固定宽度
                                                 );
                                                 
                                                 // 显示标签下拉列表（当输入框获得焦点时）
@@ -1393,100 +1716,15 @@ impl VennCVApp {
                                 });
                             });
                     } else {
-                        // 没有选中项目时，显示领域管理
-                        ScrollArea::vertical()
-                            .auto_shrink([false; 2])
-                            .show(ui, |ui| {
-                                // 严格限制宽度，防止内容扩展导致面板变宽
-                                let available_width = ui.available_width();
-                                ui.set_width(available_width);
-                                ui.set_max_width(available_width);
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        RichText::new("领域管理")
-                                            .size(12.0)
-                                            .color(theme.text_secondary)
-                                    );
-                                    ui.add_space(8.0);
-                                    
-                                    // 显示领域列表
-                                    let field_ids: Vec<String> = self.data.fields.keys().cloned().collect();
-                                    let mut fields_to_remove = Vec::new();
-                                    let mut fields_to_update: HashMap<String, String> = HashMap::new();
-                                    
-                                    for field_id in &field_ids {
-                                        if let Some(field) = self.data.fields.get(field_id) {
-                                            ui.horizontal(|ui| {
-                                                // 领域名称（可编辑）
-                                                let mut field_name = field.name.clone();
-                                                let name_response = ui.add(
-                                                    TextEdit::singleline(&mut field_name)
-                                                        .desired_width(ui.available_width() - 100.0)
-                                                );
-                                                
-                                                // 如果名称改变，记录更新
-                                                if name_response.changed() {
-                                                    fields_to_update.insert(field_id.clone(), field_name);
-                                                }
-                                                
-                                                // 删除按钮
-                                                if ui.small_button("删除").clicked() {
-                                                    fields_to_remove.push(field_id.clone());
-                                                }
-                                            });
-                                            
-                                            ui.add_space(4.0);
-                                        }
-                                    }
-                                    
-                                    // 更新领域名称（在循环外处理，避免借用冲突）
-                                    if !fields_to_update.is_empty() {
-                                        for (field_id, new_name) in fields_to_update {
-                                            if let Some(f) = self.data.fields.get_mut(&field_id) {
-                                                f.name = new_name;
-                                            }
-                                        }
-                                        self.save_to_history();
-                                    }
-                                    
-                                    // 删除领域（在循环外处理，避免借用冲突）
-                                    if !fields_to_remove.is_empty() {
-                                        for field_id in fields_to_remove {
-                                            // 从所有项目中移除该领域
-                                            for project in self.data.projects.values_mut() {
-                                                project.field_ids.retain(|id| id != &field_id);
-                                            }
-                                            // 删除领域
-                                            self.data.fields.remove(&field_id);
-                                        }
-                                        self.save_to_history();
-                                    }
-                                    
-                                    ui.add_space(12.0);
-                                    
-                                    // 添加领域按钮
-                                    if ui.add_sized(
-                                        [ui.available_width(), 28.0],
-                                        Button::new(
-                                            RichText::new("+ 添加领域")
-                                                .size(12.0)
-                                                .color(theme.text_primary)
-                                        )
-                                        .fill(theme.surface)
-                                    ).clicked() {
-                                        let new_id = format!("field_{}", self.data.fields.len() + 1);
-                                        let new_field = ResearchField {
-                                            id: new_id.clone(),
-                                            name: "新领域".to_string(),
-                                            description: String::new(),
-                                            position: (400.0, 400.0),
-                                            radius: 200.0,
-                                        };
-                                        self.data.fields.insert(new_id, new_field);
-                                        self.save_to_history();
-                                    }
-                                });
-                            });
+                        // 没有选中项目时，显示提示信息
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(
+                                RichText::new("请选择一个项目")
+                                    .size(12.0)
+                                    .color(theme.text_secondary)
+                            );
+                        });
                     }
                 });
         }
@@ -1576,8 +1814,14 @@ impl VennCVApp {
                 let offset_x = window_center_x - content_center_x * auto_scale * self.visualization_zoom;
                 let offset_y = window_center_y - content_center_y * auto_scale * self.visualization_zoom;
 
-                // 绘制研究领域（大圈）
+                // 绘制研究领域（大圈）- 只绘制有项目的领域
                 for field in self.data.fields.values() {
+                    // 检查是否有项目属于该领域
+                    let has_projects = self.data.projects.values().any(|p| p.field_ids.contains(&field.id));
+                    if !has_projects {
+                        continue; // 跳过没有项目的领域
+                    }
+                    
                     let center = pos2(
                         offset_x + field.position.0 * auto_scale * self.visualization_zoom
                             + self.visualization_offset.x,
@@ -1629,8 +1873,34 @@ impl VennCVApp {
                     
                     // 计算文字位置（在圆圈外侧，距离圆心 radius + 25 的位置）
                     let text_distance = radius + 25.0;
-                    let text_x = center.x + text_distance * best_angle.cos();
-                    let text_y = center.y + text_distance * best_angle.sin();
+                    let mut text_x = center.x + text_distance * best_angle.cos();
+                    let mut text_y = center.y + text_distance * best_angle.sin();
+                    
+                    // 估算文字尺寸（每个字符约10像素宽，高度约20像素）
+                    let text_width = field.name.chars().count() as f32 * 10.0;
+                    let text_height = 20.0;
+                    let half_width = text_width / 2.0;
+                    let half_height = text_height / 2.0;
+                    
+                    // 确保文字不超出可视化窗口边界
+                    let margin = 5.0;
+                    text_x = text_x.clamp(rect.left() + half_width + margin, rect.right() - half_width - margin);
+                    text_y = text_y.clamp(rect.top() + half_height + margin, rect.bottom() - half_height - margin);
+                    
+                    // 确保文字不进入圆圈内（检查文字中心到圆心距离）
+                    let dx = text_x - center.x;
+                    let dy = text_y - center.y;
+                    let dist_to_center = (dx * dx + dy * dy).sqrt();
+                    let min_dist = radius + half_height + 5.0;  // 至少在圆圈外 + 文字半高 + 5像素
+                    if dist_to_center < min_dist && dist_to_center > 0.0 {
+                        // 将文字推到圆圈外
+                        let scale = min_dist / dist_to_center;
+                        text_x = center.x + dx * scale;
+                        text_y = center.y + dy * scale;
+                        // 再次检查边界
+                        text_x = text_x.clamp(rect.left() + half_width + margin, rect.right() - half_width - margin);
+                        text_y = text_y.clamp(rect.top() + half_height + margin, rect.bottom() - half_height - margin);
+                    }
                     
                     painter.text(
                         pos2(text_x, text_y),
@@ -1795,23 +2065,152 @@ impl VennCVApp {
 
                 // 绘制图例（在右上角）
                 self.draw_legend(painter, rect, &theme);
-
-                // 处理点击（在绘制完成后）
-                if response.clicked() {
+                
+                // 获取图例矩形用于交互检测
+                let legend_rect = self.get_legend_rect(rect);
+                let mouse_pos = ctx.input(|i| i.pointer.hover_pos());
+                let is_over_legend = mouse_pos.map(|p| legend_rect.contains(p)).unwrap_or(false);
+                
+                // 处理图例双击（打开设置）
+                if response.double_clicked() {
                     if let Some(click_pos) = response.interact_pointer_pos() {
+                        if legend_rect.contains(click_pos) {
+                            self.show_legend_settings = true;
+                        }
+                    }
+                }
+                
+                // 处理图例拖拽
+                if is_over_legend && response.drag_started() {
+                    self.legend_dragging = true;
+                }
+                
+                if self.legend_dragging {
+                    if response.dragged() {
+                        self.legend_position += response.drag_delta();
+                    }
+                    if response.drag_stopped() {
+                        self.legend_dragging = false;
+                    }
+                }
+
+                // 处理点击（在绘制完成后）- 排除图例区域
+                if response.clicked() && !is_over_legend {
+                    if let Some(click_pos) = response.interact_pointer_pos() {
+                        let modifiers = ui.input(|i| i.modifiers);
+                        let cmd_pressed = modifiers.command; // macOS: Command, Windows/Linux: Ctrl
+                        let shift_pressed = modifiers.shift;
+                        
                         for (id, center, radius, project) in &project_centers {
                             let distance = (click_pos - *center).length();
                             if distance <= *radius {
-                                self.selected_project = Some(id.clone());
-                                self.editing_project = Some(project.clone());
+                                // 如果按住 Command 且已有选中项目，则建立关系
+                                if cmd_pressed && self.selected_project.is_some() {
+                                    let from_id = self.selected_project.clone().unwrap();
+                                    let to_id = id.clone();
+                                    
+                                    // 不能建立到自己的关系
+                                    if from_id != to_id {
+                                        // 检查是否已存在相同的关系
+                                        let relation_exists = self.data.relations.iter().any(|r| {
+                                            r.from_id == from_id && r.to_id == to_id
+                                        });
+                                        
+                                        if !relation_exists {
+                                            self.save_to_history();
+                                            // Command+Shift: 虚线箭头，Command: 实线箭头
+                                            let relation_type = if shift_pressed {
+                                                RelationType::Indirect
+                                            } else {
+                                                RelationType::Direct
+                                            };
+                                            
+                                            self.data.relations.push(ProjectRelation {
+                                                from_id,
+                                                to_id,
+                                                relation_type,
+                                                tags: Vec::new(),
+                                                color: default_relation_color(),
+                                                width: default_relation_width(),
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    // 普通点击：选中项目
+                                    self.selected_project = Some(id.clone());
+                                    self.editing_project = Some(project.clone());
+                                }
                                 break;
                             }
                         }
                     }
                 }
+                
+                // 处理项目拖拽开始
+                if response.drag_started() && !is_over_legend {
+                    if let Some(drag_pos) = response.interact_pointer_pos() {
+                        for (id, center, radius, _) in &project_centers {
+                            let distance = (drag_pos - *center).length();
+                            if distance <= *radius {
+                                self.dragging_project = Some(id.clone());
+                                self.selected_project = Some(id.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // 处理项目拖拽中
+                if response.dragged() && self.dragging_project.is_some() {
+                    let delta = response.drag_delta();
+                    // 转换屏幕坐标变化到数据坐标变化
+                    let scale = auto_scale * self.visualization_zoom;
+                    let data_delta_x = delta.x / scale;
+                    let data_delta_y = delta.y / scale;
+                    
+                    if let Some(project_id) = &self.dragging_project.clone() {
+                        if let Some(project) = self.data.projects.get_mut(project_id) {
+                            project.position.0 += data_delta_x;
+                            project.position.1 += data_delta_y;
+                        }
+                        // 同步更新编辑中的项目
+                        if let Some(editing) = &mut self.editing_project {
+                            if &editing.id == project_id {
+                                editing.position.0 += data_delta_x;
+                                editing.position.1 += data_delta_y;
+                            }
+                        }
+                    }
+                }
+                
+                // 处理项目拖拽结束
+                if response.drag_stopped() && self.dragging_project.is_some() {
+                    // 检查位置是否正确，不正确则移动到最近的正确位置
+                    if let Some(project_id) = &self.dragging_project.clone() {
+                        if let Some(project) = self.data.projects.get(project_id).cloned() {
+                            if !self.is_project_position_valid(&project) {
+                                let new_pos = self.find_nearest_valid_position(&project);
+                                if let Some(p) = self.data.projects.get_mut(project_id) {
+                                    p.position = new_pos;
+                                }
+                                // 同步更新编辑中的项目
+                                if let Some(editing) = &mut self.editing_project {
+                                    if &editing.id == project_id {
+                                        editing.position = new_pos;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 保存历史记录
+                    self.save_to_history();
+                    // 保存数据
+                    self.save_data();
+                    self.dragging_project = None;
+                }
 
-                // 处理拖拽和缩放
-                if response.dragged() {
+                // 处理拖拽和缩放 - 排除图例拖拽和项目拖拽
+                if response.dragged() && !self.legend_dragging && self.dragging_project.is_none() {
                     // 计算内容的边界（考虑缩放）
                     let scaled_content_width = content_width * auto_scale * self.visualization_zoom;
                     let scaled_content_height = content_height * auto_scale * self.visualization_zoom;
@@ -1871,38 +2270,27 @@ impl VennCVApp {
             return;
         }
         
-        // Ctrl+S: 保存
-        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.ctrl) {
+        // Command+S: 保存 (macOS)
+        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.mac_cmd) {
             self.save_data();
         }
         
-        // Ctrl+Z: 撤销
-        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.ctrl && !i.modifiers.shift) {
+        // Command+Z: 撤销 (macOS)
+        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.mac_cmd && !i.modifiers.shift) {
             self.undo();
         }
         
-        // Ctrl+Shift+Z 或 Ctrl+Y: 重做
-        if ctx.input(|i| {
-            (i.key_pressed(Key::Z) && i.modifiers.ctrl && i.modifiers.shift) ||
-            (i.key_pressed(Key::Y) && i.modifiers.ctrl)
-        }) {
+        // Command+Shift+Z: 重做 (macOS)
+        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.mac_cmd && i.modifiers.shift) {
             self.redo();
         }
         
-        // Ctrl+N: 新建项目
-        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
+        // Command+N: 新建项目 (macOS)
+        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.mac_cmd) {
             self.create_new_project_shortcut();
         }
         
-        // Tab: 切换到下一个项目
-        if ctx.input(|i| i.key_pressed(Key::Tab) && !i.modifiers.ctrl && !i.modifiers.shift) {
-            self.next_project();
-        }
-        
-        // Shift+Tab: 切换到上一个项目
-        if ctx.input(|i| i.key_pressed(Key::Tab) && i.modifiers.shift && !i.modifiers.ctrl) {
-            self.previous_project();
-        }
+        // Tab键处理已移至update函数开头，确保在UI渲染前消耗
         
         // Ctrl+Plus 或 Ctrl+=: 放大
         if ctx.input(|i| {
@@ -1920,6 +2308,46 @@ impl VennCVApp {
         // Ctrl+0: 重置缩放
         if ctx.input(|i| i.key_pressed(Key::Num0) && i.modifiers.ctrl) {
             self.zoom_reset();
+        }
+        
+        // Esc: 取消选中项目
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.selected_project = None;
+            self.toolbar_focus_index = None;  // 同时取消工具栏选中
+        }
+        
+        // Enter: 触发选中的工具栏按钮
+        if ctx.input(|i| i.key_pressed(Key::Enter)) {
+            if let Some(idx) = self.toolbar_focus_index {
+                match idx {
+                    0 => self.create_new_project_shortcut(),
+                    1 => {
+                        if let Some(id) = self.selected_project.clone() {
+                            self.data.projects.shift_remove(&id);
+                            self.data.relations.retain(|r| r.from_id != id && r.to_id != id);
+                            self.selected_project = None;
+                            self.editing_project = None;
+                            self.save_to_history();
+                        }
+                    }
+                    2 => self.save_data(),
+                    3 => self.undo(),
+                    4 => self.redo(),
+                    5 => {
+                        // 只修正位置不正确的项目
+                        self.validate_and_fix_project_positions();
+                        // 更新编辑中的项目位置
+                        if let Some(id) = &self.selected_project {
+                            if let Some(project) = self.data.projects.get(id) {
+                                if let Some(editing) = &mut self.editing_project {
+                                    editing.position = project.position;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
     
@@ -1961,7 +2389,12 @@ impl VennCVApp {
     
     /// 新建项目（快捷键）
     fn create_new_project_shortcut(&mut self) {
-        let new_id = format!("project_{}", self.data.projects.len() + 1);
+        // 找到最大的项目编号，确保新ID不会冲突
+        let max_num = self.data.projects.keys()
+            .filter_map(|id| id.strip_prefix("project_").and_then(|n| n.parse::<usize>().ok()))
+            .max()
+            .unwrap_or(0);
+        let new_id = format!("project_{}", max_num + 1);
         let mut new_project = Project {
             id: new_id.clone(),
             name: "新项目".to_string(),
@@ -1990,13 +2423,14 @@ impl VennCVApp {
             return;
         }
         
-        let current_index = if let Some(ref current) = self.selected_project {
-            project_ids.iter().position(|id| id == current).unwrap_or(0)
+        let next_index = if let Some(ref current) = self.selected_project {
+            let current_index = project_ids.iter().position(|id| id == current).unwrap_or(0);
+            (current_index + 1) % project_ids.len()
         } else {
+            // 没有选中时，从第一个项目开始
             0
         };
         
-        let next_index = (current_index + 1) % project_ids.len();
         let next_id = project_ids[next_index].clone();
         
         if let Some(project) = self.data.projects.get(&next_id) {
@@ -2073,8 +2507,10 @@ impl VennCVApp {
                                         self.current_file_path = Some(path.clone());
                                         self.selected_project = None;
                                         self.editing_project = None;
-                                        // 重置历史
-                                        self.history = vec![data];
+                                        // 验证并修正项目位置
+                                        self.validate_and_fix_project_positions();
+                                        // 重置历史（使用修正后的数据）
+                                        self.history = vec![self.data.clone()];
                                         self.history_index = 0;
                                         // 更新最近编辑的文件路径
                                         self.update_last_edited_file(&path);
@@ -2406,11 +2842,662 @@ impl VennCVApp {
         }
     }
 
-    /// 计算新项目的位置，根据所属领域自动布局，并避免与已有项目重叠
-    fn calculate_project_position(&self, project: &Project) -> (f32, f32) {
-        // 如果项目没有指定领域，使用默认位置
+    /// 检查项目位置是否正确（整个项目圆圈在所有目标领域内，且整个圆圈不在非目标领域内）
+    fn is_project_position_valid(&self, project: &Project) -> bool {
+        let (x, y) = project.position;
+        let project_radius = project.radius;
+        
         if project.field_ids.is_empty() {
-            return (400.0, 400.0);
+            // 无领域的项目必须在所有领域之外
+            for field in self.data.fields.values() {
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                // 项目圆圈最近点必须在领域外
+                if distance - project_radius < field.radius {
+                    return false;  // 项目圆圈部分在某个领域内
+                }
+            }
+        } else {
+            // 检查整个项目圆圈是否完全在所有目标领域内
+            for field_id in &project.field_ids {
+                if let Some(field) = self.data.fields.get(field_id) {
+                    let dx = x - field.position.0;
+                    let dy = y - field.position.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    // 项目圆圈最远点到领域中心的距离 = distance + project_radius
+                    // 必须 <= field.radius（留5像素边距）
+                    if distance + project_radius > field.radius - 5.0 {
+                        return false;  // 项目圆圈部分在目标领域外
+                    }
+                }
+            }
+            
+            // 检查整个项目圆圈是否完全在非目标领域外
+            for field in self.data.fields.values() {
+                if project.field_ids.contains(&field.id) {
+                    continue;
+                }
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                // 项目圆圈最近点到领域中心的距离 = distance - project_radius
+                // 必须 >= field.radius（项目圆圈完全在非目标领域外）
+                if distance - project_radius < field.radius {
+                    return false;  // 项目圆圈部分在非目标领域内
+                }
+            }
+        }
+        
+        // 检查与其他项目是否重叠
+        for other in self.data.projects.values() {
+            if other.id == project.id {
+                continue;
+            }
+            let dx = x - other.position.0;
+            let dy = y - other.position.1;
+            let distance = (dx * dx + dy * dy).sqrt();
+            // 两个圆圈不能重叠：距离必须 > 两个半径之和
+            let min_dist = project_radius + other.radius + 15.0;  // 至少15像素间距
+            if distance < min_dist {
+                return false;  // 与其他项目重叠
+            }
+        }
+        
+        true
+    }
+    
+    /// 找到离当前位置最近的正确位置
+    fn find_nearest_valid_position(&self, project: &Project) -> (f32, f32) {
+        let (current_x, current_y) = project.position;
+        let project_radius = project.radius;
+        
+        // 无领域项目：找到所有领域之外的位置
+        if project.field_ids.is_empty() {
+            let all_fields: Vec<&ResearchField> = self.data.fields.values().collect();
+            
+            let mut best_pos = project.position;
+            let mut best_dist = f32::MAX;
+            
+            for attempt in 0..500 {
+                let angle = (attempt as f32) * 0.618 * std::f32::consts::PI * 2.0;
+                let radius = (attempt as f32).sqrt() * 5.0;
+                
+                let x = current_x + radius * angle.cos();
+                let y = current_y + radius * angle.sin();
+                
+                // 检查是否在所有领域之外
+                let mut outside_all = true;
+                for field in &all_fields {
+                    let dx = x - field.position.0;
+                    let dy = y - field.position.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    if distance - project_radius < field.radius {
+                        outside_all = false;
+                        break;
+                    }
+                }
+                if !outside_all {
+                    continue;
+                }
+                
+                // 检查与其他项目的距离
+                let mut overlaps = false;
+                for existing in self.data.projects.values() {
+                    if existing.id == project.id {
+                        continue;
+                    }
+                    let dx = x - existing.position.0;
+                    let dy = y - existing.position.1;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist < project_radius + existing.radius + 15.0 {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if overlaps {
+                    continue;
+                }
+                
+                let dist = ((x - current_x).powi(2) + (y - current_y).powi(2)).sqrt();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_pos = (x, y);
+                    if dist < 1.0 {
+                        break;
+                    }
+                }
+            }
+            
+            return best_pos;
+        }
+        
+        // 收集目标领域
+        let target_fields: Vec<&ResearchField> = project.field_ids.iter()
+            .filter_map(|id| self.data.fields.get(id))
+            .collect();
+        
+        if target_fields.is_empty() {
+            return project.position;
+        }
+        
+        // 收集非目标领域
+        let non_target_fields: Vec<&ResearchField> = self.data.fields.values()
+            .filter(|f| !project.field_ids.contains(&f.id))
+            .collect();
+        
+        let mut best_pos = project.position;
+        let mut best_dist = f32::MAX;
+        
+        // 计算目标领域的中心
+        let mut target_center_x = 0.0;
+        let mut target_center_y = 0.0;
+        for field in &target_fields {
+            target_center_x += field.position.0;
+            target_center_y += field.position.1;
+        }
+        target_center_x /= target_fields.len() as f32;
+        target_center_y /= target_fields.len() as f32;
+        
+        // 计算目标领域的最小半径（用于从边缘搜索）
+        let min_target_radius = target_fields.iter()
+            .map(|f| f.radius)
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(100.0);
+        
+        // 从当前位置和目标领域边缘两个起点搜索
+        // 边缘起点：远离中心的方向
+        let edge_angle = (current_y - target_center_y).atan2(current_x - target_center_x);
+        let edge_x = target_center_x + (min_target_radius * 0.6) * edge_angle.cos();
+        let edge_y = target_center_y + (min_target_radius * 0.6) * edge_angle.sin();
+        
+        let search_starts = [(current_x, current_y), (edge_x, edge_y)];
+        
+        for (start_x, start_y) in search_starts {
+        // 螺旋搜索找最近的有效位置
+        for attempt in 0..500 {
+            let angle = (attempt as f32) * 0.618 * std::f32::consts::PI * 2.0;
+            let radius = (attempt as f32).sqrt() * 8.0;  // 增大搜索步长
+            
+            let x = start_x + radius * angle.cos();
+            let y = start_y + radius * angle.sin();
+            
+            // 检查整个项目圆圈是否完全在所有目标领域内
+            let mut in_all_targets = true;
+            for field in &target_fields {
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                // 项目圆圈最远点必须在领域内
+                if distance + project_radius > field.radius - 5.0 {
+                    in_all_targets = false;
+                    break;
+                }
+            }
+            if !in_all_targets {
+                continue;
+            }
+            
+            // 检查整个项目圆圈是否完全在非目标领域外
+            let mut in_non_target = false;
+            for field in &non_target_fields {
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                // 项目圆圈最近点必须在非目标领域外
+                if distance - project_radius < field.radius {
+                    in_non_target = true;
+                    break;
+                }
+            }
+            if in_non_target {
+                continue;
+            }
+            
+            // 检查与其他项目的距离（避免重叠，保持间距）
+            let mut overlaps_project = false;
+            for existing in self.data.projects.values() {
+                if existing.id == project.id {
+                    continue;
+                }
+                let dx = x - existing.position.0;
+                let dy = y - existing.position.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+                // 两个圆圈不能重叠：距离必须 > 两个半径之和 + 间距
+                let min_dist = project_radius + existing.radius + 15.0;  // 保持15像素间距
+                if dist < min_dist {
+                    overlaps_project = true;
+                    break;
+                }
+            }
+            if overlaps_project {
+                continue;
+            }
+            
+            // 计算到原位置的距离
+            let dist = ((x - current_x).powi(2) + (y - current_y).powi(2)).sqrt();
+            if dist < best_dist {
+                best_dist = dist;
+                best_pos = (x, y);
+                if dist < 1.0 {
+                    break;  // 足够近了
+                }
+            }
+        }
+        }  // 结束 search_starts 循环
+        
+        best_pos
+    }
+    
+    /// 检查点是否在线段附近（用于检测箭头穿过）
+    fn point_near_line_segment(&self, px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32, threshold: f32) -> bool {
+        let line_len_sq = (x2 - x1).powi(2) + (y2 - y1).powi(2);
+        if line_len_sq < 1.0 {
+            return false;  // 线段太短
+        }
+        
+        // 计算点到线段的最近点参数 t
+        let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / line_len_sq;
+        let t = t.clamp(0.0, 1.0);
+        
+        // 最近点坐标
+        let nearest_x = x1 + t * (x2 - x1);
+        let nearest_y = y1 + t * (y2 - y1);
+        
+        // 计算距离
+        let dist = ((px - nearest_x).powi(2) + (py - nearest_y).powi(2)).sqrt();
+        dist < threshold
+    }
+    
+    /// 重新计算所有项目位置（用于领域位置变化后）
+    fn recalculate_all_project_positions(&mut self) {
+        let project_ids: Vec<String> = self.data.projects.keys().cloned().collect();
+        for id in project_ids {
+            if let Some(project) = self.data.projects.get(&id).cloned() {
+                let new_pos = self.calculate_project_position(&project);
+                if let Some(p) = self.data.projects.get_mut(&id) {
+                    p.position = new_pos;
+                }
+            }
+        }
+    }
+    
+    /// 重新计算所有项目位置（带随机抖动，用于领域顺序变化后）
+    fn recalculate_all_project_positions_with_jitter(&mut self) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        let project_ids: Vec<String> = self.data.projects.keys().cloned().collect();
+        for (idx, id) in project_ids.iter().enumerate() {
+            if let Some(project) = self.data.projects.get(id).cloned() {
+                // 先给位置加入随机抖动，避免完全重叠
+                let jitter_seed = seed.wrapping_add(idx as u64);
+                let jitter_x = ((jitter_seed % 100) as f32 - 50.0) * 0.5;
+                let jitter_y = (((jitter_seed / 100) % 100) as f32 - 50.0) * 0.5;
+                
+                if let Some(p) = self.data.projects.get_mut(id) {
+                    p.position.0 += jitter_x;
+                    p.position.1 += jitter_y;
+                }
+                
+                // 重新获取带抖动的项目
+                if let Some(project) = self.data.projects.get(id).cloned() {
+                    let new_pos = self.calculate_project_position(&project);
+                    if let Some(p) = self.data.projects.get_mut(id) {
+                        p.position = new_pos;
+                    }
+                }
+            }
+        }
+    }
+    
+    /// 验证并修正所有项目位置（使用物理引擎思想）
+    fn validate_and_fix_project_positions(&mut self) {
+        let mut changed = false;
+        
+        // 第一步：先确保所有项目在正确的区域内
+        let project_ids: Vec<String> = self.data.projects.keys().cloned().collect();
+        for id in &project_ids {
+            if let Some(project) = self.data.projects.get(id).cloned() {
+                if !self.is_project_in_correct_region(&project) {
+                    let new_pos = self.find_nearest_valid_position(&project);
+                    if let Some(p) = self.data.projects.get_mut(id) {
+                        p.position = new_pos;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        
+        // 第二步：物理引擎迭代，解决重叠问题
+        let physics_iterations = 50;
+        let damping = 0.8;  // 阻尼系数
+        let min_spacing = 15.0;  // 最小间距
+        let arrow_spacing = 25.0;  // 箭头避让距离
+        
+        for _ in 0..physics_iterations {
+            let mut forces: std::collections::HashMap<String, (f32, f32)> = std::collections::HashMap::new();
+            
+            // 初始化力为零
+            for id in &project_ids {
+                forces.insert(id.clone(), (0.0, 0.0));
+            }
+            
+            // 计算项目之间的斥力
+            for i in 0..project_ids.len() {
+                for j in (i + 1)..project_ids.len() {
+                    let id1 = &project_ids[i];
+                    let id2 = &project_ids[j];
+                    
+                    if let (Some(p1), Some(p2)) = (
+                        self.data.projects.get(id1),
+                        self.data.projects.get(id2)
+                    ) {
+                        let dx = p2.position.0 - p1.position.0;
+                        let dy = p2.position.1 - p1.position.1;
+                        let distance = (dx * dx + dy * dy).sqrt().max(1.0);
+                        let min_dist = p1.radius + p2.radius + min_spacing;
+                        
+                        if distance < min_dist {
+                            // 计算斥力（重叠越多，力越大）
+                            let overlap = min_dist - distance;
+                            let force_magnitude = overlap * 0.5;
+                            let fx = (dx / distance) * force_magnitude;
+                            let fy = (dy / distance) * force_magnitude;
+                            
+                            // p1 受到反方向的力
+                            if let Some(f) = forces.get_mut(id1) {
+                                f.0 -= fx;
+                                f.1 -= fy;
+                            }
+                            // p2 受到正方向的力
+                            if let Some(f) = forces.get_mut(id2) {
+                                f.0 += fx;
+                                f.1 += fy;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 计算箭头对项目的斥力
+            let relations: Vec<(String, String)> = self.data.relations.iter()
+                .map(|r| (r.from_id.clone(), r.to_id.clone()))
+                .collect();
+            
+            for (from_id, to_id) in &relations {
+                if let (Some(from_proj), Some(to_proj)) = (
+                    self.data.projects.get(from_id),
+                    self.data.projects.get(to_id)
+                ) {
+                    let (x1, y1) = from_proj.position;
+                    let (x2, y2) = to_proj.position;
+                    
+                    // 对每个不是箭头端点的项目计算斥力
+                    for id in &project_ids {
+                        if id == from_id || id == to_id {
+                            continue;
+                        }
+                        
+                        if let Some(project) = self.data.projects.get(id) {
+                            let (px, py) = project.position;
+                            let threshold = project.radius + arrow_spacing;
+                            
+                            // 计算点到线段的最近点
+                            let line_len_sq = (x2 - x1).powi(2) + (y2 - y1).powi(2);
+                            if line_len_sq > 1.0 {
+                                let t = (((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / line_len_sq).clamp(0.0, 1.0);
+                                let nearest_x = x1 + t * (x2 - x1);
+                                let nearest_y = y1 + t * (y2 - y1);
+                                
+                                let dx = px - nearest_x;
+                                let dy = py - nearest_y;
+                                let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+                                
+                                if dist < threshold {
+                                    let overlap = threshold - dist;
+                                    let force_magnitude = overlap * 0.3;
+                                    let fx = (dx / dist) * force_magnitude;
+                                    let fy = (dy / dist) * force_magnitude;
+                                    
+                                    if let Some(f) = forces.get_mut(id) {
+                                        f.0 += fx;
+                                        f.1 += fy;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 应用力并检查边界约束
+            let mut any_moved = false;
+            for id in &project_ids {
+                if let Some((fx, fy)) = forces.get(id).cloned() {
+                    if fx.abs() > 0.1 || fy.abs() > 0.1 {
+                        if let Some(project) = self.data.projects.get(id).cloned() {
+                            let mut new_x = project.position.0 + fx * damping;
+                            let mut new_y = project.position.1 + fy * damping;
+                            
+                            // 边界约束：确保项目仍在正确区域内
+                            let mut temp_project = project.clone();
+                            temp_project.position = (new_x, new_y);
+                            
+                            if !self.is_project_in_correct_region(&temp_project) {
+                                // 如果移动后不在正确区域，尝试只移动一个方向
+                                temp_project.position = (new_x, project.position.1);
+                                if self.is_project_in_correct_region(&temp_project) {
+                                    new_y = project.position.1;
+                                } else {
+                                    temp_project.position = (project.position.0, new_y);
+                                    if self.is_project_in_correct_region(&temp_project) {
+                                        new_x = project.position.0;
+                                    } else {
+                                        // 两个方向都不行，不移动
+                                        continue;
+                                    }
+                                }
+                            }
+                            
+                            if let Some(p) = self.data.projects.get_mut(id) {
+                                p.position = (new_x, new_y);
+                                any_moved = true;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !any_moved {
+                break;  // 已达到平衡
+            }
+        }
+        
+        // 第三步：检查是否仍有重叠，如果有则扩展领域
+        let still_overlapping = self.check_any_project_overlap(min_spacing);
+        if still_overlapping {
+            self.expand_fields_for_projects();
+            changed = true;
+            // 扩展后重新验证位置
+            for id in &project_ids {
+                if let Some(project) = self.data.projects.get(id).cloned() {
+                    if !self.is_project_in_correct_region(&project) {
+                        let new_pos = self.find_nearest_valid_position(&project);
+                        if let Some(p) = self.data.projects.get_mut(id) {
+                            p.position = new_pos;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if changed {
+            self.save_to_history();
+        }
+    }
+    
+    /// 检查是否有任何项目重叠
+    fn check_any_project_overlap(&self, min_spacing: f32) -> bool {
+        let project_ids: Vec<String> = self.data.projects.keys().cloned().collect();
+        for i in 0..project_ids.len() {
+            for j in (i + 1)..project_ids.len() {
+                if let (Some(p1), Some(p2)) = (
+                    self.data.projects.get(&project_ids[i]),
+                    self.data.projects.get(&project_ids[j])
+                ) {
+                    let dx = p1.position.0 - p2.position.0;
+                    let dy = p1.position.1 - p2.position.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    let min_dist = p1.radius + p2.radius + min_spacing;
+                    if distance < min_dist {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    
+    /// 扩展领域大小以容纳更多项目
+    fn expand_fields_for_projects(&mut self) {
+        let expand_amount = 30.0;  // 每次扩展30像素
+        
+        // 统计每个领域内的项目数量和所需空间
+        let mut field_project_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut field_required_area: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        
+        for project in self.data.projects.values() {
+            for field_id in &project.field_ids {
+                *field_project_count.entry(field_id.clone()).or_insert(0) += 1;
+                let area = std::f32::consts::PI * (project.radius + 7.5).powi(2);  // 项目面积 + 间距
+                *field_required_area.entry(field_id.clone()).or_insert(0.0) += area;
+            }
+        }
+        
+        // 检查并扩展需要更多空间的领域
+        for (field_id, required_area) in &field_required_area {
+            if let Some(field) = self.data.fields.get_mut(field_id) {
+                let current_area = std::f32::consts::PI * field.radius.powi(2);
+                // 如果所需面积超过当前面积的40%（考虑交叉区域），则扩展
+                if *required_area > current_area * 0.4 {
+                    field.radius += expand_amount;
+                }
+            }
+        }
+    }
+    
+    /// 检查项目是否在正确的区域内（不检查与其他项目的重叠）
+    fn is_project_in_correct_region(&self, project: &Project) -> bool {
+        let (x, y) = project.position;
+        let project_radius = project.radius;
+        
+        if project.field_ids.is_empty() {
+            // 无领域的项目必须在所有领域之外
+            for field in self.data.fields.values() {
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance - project_radius < field.radius {
+                    return false;
+                }
+            }
+        } else {
+            // 检查整个项目圆圈是否完全在所有目标领域内
+            for field_id in &project.field_ids {
+                if let Some(field) = self.data.fields.get(field_id) {
+                    let dx = x - field.position.0;
+                    let dy = y - field.position.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    if distance + project_radius > field.radius - 5.0 {
+                        return false;
+                    }
+                }
+            }
+            
+            // 检查整个项目圆圈是否完全在非目标领域外
+            for field in self.data.fields.values() {
+                if project.field_ids.contains(&field.id) {
+                    continue;
+                }
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance - project_radius < field.radius {
+                    return false;
+                }
+            }
+        }
+        
+        true
+    }
+
+    /// 计算新项目的位置，根据所属领域自动布局，并避免与已有项目重叠
+    /// 单领域项目会放在远离其他领域的方向，避免被误认为在交叉区域
+    fn calculate_project_position(&self, project: &Project) -> (f32, f32) {
+        let project_radius = project.radius;
+        
+        // 如果项目没有指定领域，放在所有领域之外
+        if project.field_ids.is_empty() {
+            // 计算所有领域的边界
+            let mut max_x = 0.0_f32;
+            let mut max_y = 0.0_f32;
+            for field in self.data.fields.values() {
+                max_x = max_x.max(field.position.0 + field.radius);
+                max_y = max_y.max(field.position.1 + field.radius);
+            }
+            
+            // 在右下角外侧找位置
+            let start_x = max_x + 50.0;
+            let start_y = max_y + 50.0;
+            
+            // 螺旋搜索找不重叠的位置
+            for attempt in 0..200 {
+                let angle = (attempt as f32) * 0.618 * std::f32::consts::PI * 2.0;
+                let radius = (attempt as f32).sqrt() * 10.0;
+                
+                let x = start_x + radius * angle.cos();
+                let y = start_y + radius * angle.sin();
+                
+                // 检查是否在所有领域之外
+                let mut outside_all = true;
+                for field in self.data.fields.values() {
+                    let dx = x - field.position.0;
+                    let dy = y - field.position.1;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    if distance - project_radius < field.radius {
+                        outside_all = false;
+                        break;
+                    }
+                }
+                if !outside_all {
+                    continue;
+                }
+                
+                // 检查与其他项目的距离
+                let mut overlaps = false;
+                for existing in self.data.projects.values() {
+                    if existing.id == project.id {
+                        continue;
+                    }
+                    let dx = x - existing.position.0;
+                    let dy = y - existing.position.1;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist < project_radius + existing.radius + 15.0 {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if !overlaps {
+                    return (x, y);
+                }
+            }
+            
+            return (start_x, start_y);
         }
 
         // 计算所属领域的中心位置和半径
@@ -2418,6 +3505,7 @@ impl VennCVApp {
         let mut center_y = 0.0;
         let mut min_radius = f32::MAX;
         let mut field_count = 0;
+        let mut target_fields: Vec<&ResearchField> = Vec::new();
 
         for field_id in &project.field_ids {
             if let Some(field) = self.data.fields.get(field_id) {
@@ -2425,6 +3513,7 @@ impl VennCVApp {
                 center_y += field.position.1;
                 min_radius = min_radius.min(field.radius);
                 field_count += 1;
+                target_fields.push(field);
             }
         }
 
@@ -2436,117 +3525,354 @@ impl VennCVApp {
         center_x /= field_count as f32;
         center_y /= field_count as f32;
 
-        // 如果只有一个领域，在领域圆圈内分布，但要确保不靠近边界
-        // 如果有多个领域，在交集区域分布
-        let base_radius = if field_count == 1 {
-            // 单领域：确保项目圆圈完全在领域圆圈内，不靠近边界
-            // 计算安全距离：项目半径 + 边界间距
-            let safe_margin = project.radius + 10.0; // 至少10像素间距
-            let max_safe_radius = min_radius - safe_margin;
-            // 在30%-70%的位置范围内分布，避免靠近中心或边界
-            max_safe_radius * 0.5  // 在50%位置，留出足够空间
-        } else {
-            // 多领域：在交集区域，更靠近中心
-            min_radius * 0.3
-        };
-
-        // 尝试多个位置，找到不重叠的位置
         let project_radius = project.radius;
 
-        // 尝试不同角度和半径
-        let max_attempts = 50;
-        for attempt in 0..max_attempts {
-            let angle = (attempt as f32) * 0.5; // 每次旋转0.5弧度
-            let radius_offset = (attempt as f32 / 10.0) * 10.0; // 逐渐增加半径
-            let radius = base_radius + radius_offset.min(min_radius * 0.3); // 限制最大半径偏移
-
-            let x = center_x + radius * angle.cos();
-            let y = center_y + radius * angle.sin();
-
-            // 检查项目圆圈是否完全在领域圆圈内（单领域时）
-            let mut is_inside_field = true;
-            if field_count == 1 {
-                if let Some(field_id) = project.field_ids.first() {
-                    if let Some(field) = self.data.fields.get(field_id) {
-                        let dx = x - field.position.0;
-                        let dy = y - field.position.1;
-                        let distance_from_field_center = (dx * dx + dy * dy).sqrt();
-                        // 确保项目圆圈完全在领域圆圈内，留出安全边距
-                        let safe_distance = field.radius - project_radius - 10.0; // 至少10像素边距
-                        if distance_from_field_center > safe_distance {
-                            is_inside_field = false;
+        // 单领域：计算远离其他领域的方向
+        if field_count == 1 {
+            let target_field = target_fields[0];
+            
+            // 收集其他领域的位置
+            let other_fields: Vec<&ResearchField> = self.data.fields.values()
+                .filter(|f| f.id != target_field.id)
+                .collect();
+            
+            // 计算远离其他领域的方向
+            let (preferred_angle, use_opposite) = if !other_fields.is_empty() {
+                // 计算从目标领域中心指向其他领域中心的平均方向
+                let mut avg_dx = 0.0;
+                let mut avg_dy = 0.0;
+                for other in &other_fields {
+                    avg_dx += other.position.0 - target_field.position.0;
+                    avg_dy += other.position.1 - target_field.position.1;
+                }
+                avg_dx /= other_fields.len() as f32;
+                avg_dy /= other_fields.len() as f32;
+                
+                // 使用相反方向（远离其他领域）
+                let opposite_angle = (-avg_dy).atan2(-avg_dx);
+                (opposite_angle, true)
+            } else {
+                (0.0, false)
+            };
+            
+            // 安全边距
+            let safe_margin = project_radius + 15.0;
+            let max_safe_radius = target_field.radius - safe_margin;
+            
+            // 收集该领域内已有项目的位置（用于找最空白的位置）
+            let existing_projects: Vec<(f32, f32, f32)> = self.data.projects.values()
+                .filter(|p| p.id != project.id && p.field_ids.contains(&target_field.id))
+                .map(|p| (p.position.0, p.position.1, p.radius))
+                .collect();
+            
+            // 生成候选位置并评分（离已有项目越远越好）
+            let golden_angle = 2.399963229728653;  // 黄金角 ≈ 137.5°
+            let mut best_pos: Option<(f32, f32)> = None;
+            let mut best_min_dist = 0.0_f32;
+            
+            // 遍历多个候选位置
+            let max_attempts = 200;
+            for attempt in 0..max_attempts {
+                // 黄金角螺旋覆盖整个领域
+                let angle = (attempt as f32) * golden_angle;
+                
+                // 半径从边缘向内，覆盖整个领域
+                let radius_factor = 0.8 - (attempt as f32 / max_attempts as f32) * 0.6;
+                let radius = (max_safe_radius * radius_factor).max(project_radius + 10.0);
+                
+                let x = target_field.position.0 + radius * angle.cos();
+                let y = target_field.position.1 + radius * angle.sin();
+                
+                // 检查是否在领域内
+                let dx = x - target_field.position.0;
+                let dy = y - target_field.position.1;
+                let distance_from_center = (dx * dx + dy * dy).sqrt();
+                if distance_from_center > max_safe_radius {
+                    continue;
+                }
+                
+                // 检查整个项目圆圈是否与其他领域交叉（项目圆圈不能进入非目标领域）
+                let mut in_other_field = false;
+                for other in &other_fields {
+                    let odx = x - other.position.0;
+                    let ody = y - other.position.1;
+                    let dist_to_other = (odx * odx + ody * ody).sqrt();
+                    // 项目圆圈最近点到领域中心的距离 = dist_to_other - project_radius
+                    // 必须 >= other.radius（项目圆圈完全在非目标领域外）
+                    if dist_to_other - project_radius < other.radius {
+                        in_other_field = true;
+                        break;
+                    }
+                }
+                if in_other_field {
+                    continue;
+                }
+                
+                // 检查是否与已有项目重叠（保持间距）
+                let mut has_overlap = false;
+                let mut min_dist_to_existing = f32::MAX;
+                for existing_project in self.data.projects.values() {
+                    if existing_project.id == project.id {
+                        continue;
+                    }
+                    let edx = x - existing_project.position.0;
+                    let edy = y - existing_project.position.1;
+                    let distance = (edx * edx + edy * edy).sqrt();
+                    // 两个圆圈不能重叠：距离必须 > 两个半径之和 + 间距
+                    let min_dist = project_radius + existing_project.radius + 15.0;  // 保持15像素间距
+                    if distance < min_dist {
+                        has_overlap = true;
+                        break;
+                    }
+                    // 记录到最近项目的距离
+                    min_dist_to_existing = min_dist_to_existing.min(distance);
+                }
+                if has_overlap {
+                    continue;
+                }
+                
+                // 检查是否被箭头穿过
+                let mut crossed_by_arrow = false;
+                for relation in &self.data.relations {
+                    // 跳过与当前项目相关的箭头
+                    if relation.from_id == project.id || relation.to_id == project.id {
+                        continue;
+                    }
+                    if let (Some(from), Some(to)) = (
+                        self.data.projects.get(&relation.from_id),
+                        self.data.projects.get(&relation.to_id),
+                    ) {
+                        if self.point_near_line_segment(
+                            x, y,
+                            from.position.0, from.position.1,
+                            to.position.0, to.position.1,
+                            project_radius + 25.0,  // 箭头避让距离：项目半径 + 25像素间距
+                        ) {
+                            crossed_by_arrow = true;
+                            break;
                         }
                     }
                 }
+                if crossed_by_arrow {
+                    continue;
+                }
+                
+                // 这是一个有效位置，记录离已有项目最远的位置
+                if min_dist_to_existing > best_min_dist {
+                    best_min_dist = min_dist_to_existing;
+                    best_pos = Some((x, y));
+                }
+            }
+            
+            // 返回最空白的位置
+            if let Some(pos) = best_pos {
+                return pos;
+            }
+            
+            // 回退：扩大搜索范围，放宽重叠和箭头限制，但仍严格检查领域边界
+            for attempt in 0..200 {
+                let angle = (attempt as f32) * 0.618 * std::f32::consts::PI * 2.0;
+                let radius = (attempt as f32).sqrt() * 10.0;
+                
+                let x = target_field.position.0 + radius * angle.cos();
+                let y = target_field.position.1 + radius * angle.sin();
+                
+                // 检查是否在目标领域内
+                let dx = x - target_field.position.0;
+                let dy = y - target_field.position.1;
+                let distance_from_center = (dx * dx + dy * dy).sqrt();
+                if distance_from_center + project_radius > target_field.radius - 5.0 {
+                    continue;
+                }
+                
+                // 严格检查：整个项目圆圈不能进入非目标领域
+                let mut in_other_field = false;
+                for other in &other_fields {
+                    let odx = x - other.position.0;
+                    let ody = y - other.position.1;
+                    let dist_to_other = (odx * odx + ody * ody).sqrt();
+                    if dist_to_other - project_radius < other.radius {
+                        in_other_field = true;
+                        break;
+                    }
+                }
+                if in_other_field {
+                    continue;
+                }
+                
+                return (x, y);
+            }
+            
+            // 最终回退：领域中心（不理想但至少在目标领域内）
+            return (target_field.position.0, target_field.position.1);
+        }
+        
+        // 多领域：找到真正的交集区域中心，同时远离非目标领域
+        // 收集非目标领域
+        let non_target_fields: Vec<&ResearchField> = self.data.fields.values()
+            .filter(|f| !project.field_ids.contains(&f.id))
+            .collect();
+        
+        // 计算远离非目标领域的方向
+        let mut away_dir_x = 0.0;
+        let mut away_dir_y = 0.0;
+        for non_target in &non_target_fields {
+            // 从非目标领域中心指向目标领域平均中心的方向
+            away_dir_x += center_x - non_target.position.0;
+            away_dir_y += center_y - non_target.position.1;
+        }
+        let away_len = (away_dir_x * away_dir_x + away_dir_y * away_dir_y).sqrt();
+        if away_len > 0.0 {
+            away_dir_x /= away_len;
+            away_dir_y /= away_len;
+        }
+        
+        // 使用迭代方法找到所有领域的交集中心，同时尽量远离非目标领域
+        let mut intersection_center_x = center_x;
+        let mut intersection_center_y = center_y;
+        
+        // 迭代优化：将中心点移向所有目标领域都能覆盖且远离非目标领域的位置
+        for _ in 0..100 {
+            let mut move_x = 0.0;
+            let mut move_y = 0.0;
+            let mut need_move = false;
+            
+            // 确保在所有目标领域内
+            for field in &target_fields {
+                let dx = intersection_center_x - field.position.0;
+                let dy = intersection_center_y - field.position.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let max_dist = field.radius - project_radius - 15.0;
+                
+                if dist > max_dist && dist > 0.0 {
+                    let ratio = (dist - max_dist) / dist;
+                    move_x -= dx * ratio * 0.5;
+                    move_y -= dy * ratio * 0.5;
+                    need_move = true;
+                }
+            }
+            
+            // 远离非目标领域
+            for non_target in &non_target_fields {
+                let dx = intersection_center_x - non_target.position.0;
+                let dy = intersection_center_y - non_target.position.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+                // 如果太靠近非目标领域，向外推
+                if dist < non_target.radius + project_radius + 20.0 && dist > 0.0 {
+                    let push_strength = (non_target.radius + project_radius + 20.0 - dist) / dist;
+                    move_x += dx * push_strength * 0.3;
+                    move_y += dy * push_strength * 0.3;
+                    need_move = true;
+                }
+            }
+            
+            if !need_move {
+                break;
+            }
+            
+            intersection_center_x += move_x;
+            intersection_center_y += move_y;
+        }
+        
+        // 从交集中心开始搜索
+        let base_radius = 0.0;  // 从中心开始
+        
+        let max_attempts = 100;
+        for attempt in 0..max_attempts {
+            let angle = (attempt as f32) * 0.618 * std::f32::consts::PI * 2.0;  // 黄金角
+            let radius = base_radius + (attempt as f32).sqrt() * 8.0;  // 螺旋扩展
+
+            let x = intersection_center_x + radius * angle.cos();
+            let y = intersection_center_y + radius * angle.sin();
+
+            // 检查整个项目圆圈是否完全在所有目标领域内
+            let mut in_all_fields = true;
+            for field in &target_fields {
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                // 项目圆圈最远点必须在领域内（留10像素边距）
+                if distance + project_radius > field.radius - 10.0 {
+                    in_all_fields = false;
+                    break;
+                }
+            }
+            if !in_all_fields {
+                continue;
+            }
+            
+            // 检查整个项目圆圈是否完全在非目标领域外
+            let mut in_non_target_field = false;
+            for field in self.data.fields.values() {
+                // 跳过目标领域
+                if project.field_ids.contains(&field.id) {
+                    continue;
+                }
+                let dx = x - field.position.0;
+                let dy = y - field.position.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                // 整个项目圆圈必须在非目标领域外
+                // 项目圆圈最近点到领域中心距离 = distance - project_radius
+                if distance - project_radius < field.radius {
+                    in_non_target_field = true;
+                    break;
+                }
+            }
+            if in_non_target_field {
+                continue;
             }
 
-            // 检查是否与已有项目重叠
+            // 检查是否与已有项目重叠（保持间距）
             let mut has_overlap = false;
             for existing_project in self.data.projects.values() {
+                if existing_project.id == project.id {
+                    continue;
+                }
                 let dx = x - existing_project.position.0;
                 let dy = y - existing_project.position.1;
                 let distance = (dx * dx + dy * dy).sqrt();
-                let min_dist = project_radius + existing_project.radius + 5.0; // 额外5像素间距
-
+                // 两个圆圈不能重叠：距离必须 > 两个半径之和 + 间距
+                let min_dist = project_radius + existing_project.radius + 15.0;  // 保持15像素间距
                 if distance < min_dist {
                     has_overlap = true;
                     break;
                 }
             }
-
-            // 如果位置合适（在领域内且不重叠），返回
-            if is_inside_field && !has_overlap {
-                return (x, y);
+            if has_overlap {
+                continue;
             }
-        }
-
-        // 如果所有尝试都失败，使用螺旋搜索
-        for spiral_layer in 1..20 {
-            let layer_radius = base_radius + (spiral_layer as f32 * 10.0); // 减小步长
-            let points_in_layer = (layer_radius * 0.1) as usize + 4;
             
-            for i in 0..points_in_layer {
-                let angle = (i as f32 / points_in_layer as f32) * std::f32::consts::PI * 2.0;
-                let x = center_x + layer_radius * angle.cos();
-                let y = center_y + layer_radius * angle.sin();
-
-                // 检查项目圆圈是否完全在领域圆圈内（单领域时）
-                let mut is_inside_field = true;
-                if field_count == 1 {
-                    if let Some(field_id) = project.field_ids.first() {
-                        if let Some(field) = self.data.fields.get(field_id) {
-                            let dx = x - field.position.0;
-                            let dy = y - field.position.1;
-                            let distance_from_field_center = (dx * dx + dy * dy).sqrt();
-                            let safe_distance = field.radius - project_radius - 10.0;
-                            if distance_from_field_center > safe_distance {
-                                is_inside_field = false;
-                            }
-                        }
-                    }
+            // 检查是否被箭头穿过
+            let mut crossed_by_arrow = false;
+            for relation in &self.data.relations {
+                // 跳过与当前项目相关的箭头
+                if relation.from_id == project.id || relation.to_id == project.id {
+                    continue;
                 }
-
-                let mut has_overlap = false;
-                for existing_project in self.data.projects.values() {
-                    let dx = x - existing_project.position.0;
-                    let dy = y - existing_project.position.1;
-                    let distance = (dx * dx + dy * dy).sqrt();
-                    let min_dist = project_radius + existing_project.radius + 5.0;
-
-                    if distance < min_dist {
-                        has_overlap = true;
+                if let (Some(from), Some(to)) = (
+                    self.data.projects.get(&relation.from_id),
+                    self.data.projects.get(&relation.to_id),
+                ) {
+                    if self.point_near_line_segment(
+                        x, y,
+                        from.position.0, from.position.1,
+                        to.position.0, to.position.1,
+                        project_radius + 25.0,  // 箭头避让距离：项目半径 + 25像素间距
+                    ) {
+                        crossed_by_arrow = true;
                         break;
                     }
                 }
-
-                if is_inside_field && !has_overlap {
-                    return (x, y);
-                }
             }
+            if crossed_by_arrow {
+                continue;
+            }
+
+            return (x, y);
         }
 
-        // 最后的回退：返回领域中心附近的位置
-        (center_x, center_y)
+        // 最后的回退：返回交集中心位置
+        (intersection_center_x, intersection_center_y)
     }
 
     /// 根据完成度百分比计算边界颜色
@@ -2571,62 +3897,99 @@ impl VennCVApp {
         }
     }
 
-    /// 绘制图例，显示项目状态和完成度的颜色含义
-    fn draw_legend(&self, painter: &egui::Painter, rect: Rect, theme: &Theme) {
-        use crate::models::ProjectStatus;
+    /// 计算图例的矩形区域
+    fn get_legend_rect(&self, rect: Rect) -> Rect {
+        // 图例尺寸参数
+        let padding = 12.0;
+        let legend_width = 140.0;
+        let item_height = 18.0;
+        let spacing = 3.0;
+        let title_height = 22.0;
+        let section_title_height = 16.0;
+        let section_spacing = 8.0;
         
-        // 图例位置：右上角，留出边距
-        let margin = 10.0;
-        let legend_width = 180.0;
-        let legend_x = rect.right() - legend_width - margin;
-        let legend_y = rect.top() + margin;
-        
-        // 计算图例高度
-        let item_height = 20.0;
-        let spacing = 4.0;
-        let title_height = 24.0;
-        let section_spacing = 12.0;
-        
-        // 项目状态部分：5个状态
+        // 项目状态部分：5个状态 + 1个标题
         let status_count = 5;
-        // 完成度部分：3个示例（0%, 50%, 100%）
+        // 完成度部分：3个示例 + 1个标题
         let completion_count = 3;
         
-        let legend_height = title_height 
-            + (status_count as f32 * item_height + (status_count - 1) as f32 * spacing)
-            + section_spacing
-            + (completion_count as f32 * item_height + (completion_count - 1) as f32 * spacing)
-            + margin * 2.0;
+        // 精确计算高度
+        let legend_height = padding  // 顶部内边距
+            + title_height  // 标题
+            + spacing  // 标题后间距
+            + section_title_height  // "项目状态:"
+            + (status_count as f32) * (item_height + spacing)  // 状态项
+            + section_spacing  // 分组间距
+            + section_title_height  // "完成度:"
+            + (completion_count as f32) * (item_height + spacing)  // 完成度项
+            + padding;  // 底部内边距
         
-        // 绘制半透明背景
-        let bg_color = Color32::from_rgba_unmultiplied(255, 255, 255, 230);
-        let legend_rect = Rect::from_min_size(
+        // 默认位置：右上角
+        let default_x = rect.right() - legend_width - 10.0;
+        let default_y = rect.top() + 10.0;
+        
+        // 应用用户拖拽的偏移
+        let legend_x = default_x + self.legend_position.x;
+        let legend_y = default_y + self.legend_position.y;
+        
+        // 限制图例在可视化区域内
+        let legend_x = legend_x.clamp(rect.left(), rect.right() - legend_width);
+        let legend_y = legend_y.clamp(rect.top(), rect.bottom() - legend_height);
+        
+        Rect::from_min_size(
             pos2(legend_x, legend_y),
             vec2(legend_width, legend_height),
-        );
+        )
+    }
+    
+    /// 绘制图例，显示项目状态和完成度的颜色含义
+    fn draw_legend(&self, painter: &egui::Painter, rect: Rect, _theme: &Theme) {
+        use crate::models::ProjectStatus;
+        
+        if !self.settings.show_legend {
+            return;
+        }
+        
+        // 获取图例矩形
+        let legend_rect = self.get_legend_rect(rect);
+        let legend_x = legend_rect.left();
+        let legend_y = legend_rect.top();
+        let legend_width = legend_rect.width();
+        
+        // 图例尺寸参数
+        let padding = 12.0;
+        let item_height = 18.0;
+        let spacing = 3.0;
+        let title_height = 22.0;
+        let section_title_height = 16.0;
+        let section_spacing = 8.0;
+        
+        // 绘制半透明背景
+        let bg_color = Color32::from_rgba_unmultiplied(255, 255, 255, 240);
         painter.rect_filled(legend_rect, 4.0, bg_color);
-        painter.rect_stroke(legend_rect, 4.0, (1.0, Color32::from_rgb(200, 200, 200)));
+        painter.rect_stroke(legend_rect, 4.0, (1.0, Color32::from_rgb(180, 180, 180)));
         
         // 绘制标题
-        let mut current_y = legend_y + margin;
+        let mut current_y = legend_y + padding + title_height / 2.0;
         painter.text(
-            pos2(legend_x + legend_width / 2.0, current_y + title_height / 2.0),
+            pos2(legend_x + legend_width / 2.0, current_y),
             Align2::CENTER_CENTER,
             "图例",
-            FontId::proportional(13.0),
+            FontId::proportional(12.0),
             Color32::BLACK,
         );
-        current_y += title_height + spacing;
+        current_y += title_height / 2.0 + spacing;
         
         // 绘制项目状态图例
+        current_y += section_title_height / 2.0;
         painter.text(
-            pos2(legend_x + margin, current_y),
+            pos2(legend_x + padding, current_y),
             Align2::LEFT_CENTER,
             "项目状态:",
-            FontId::proportional(11.0),
+            FontId::proportional(10.0),
             Color32::DARK_GRAY,
         );
-        current_y += item_height;
+        current_y += section_title_height / 2.0;
         
         let statuses = [
             ProjectStatus::Published,
@@ -2640,19 +4003,20 @@ impl VennCVApp {
             let color = status.color();
             let name = status.name();
             
+            current_y += item_height / 2.0;
+            
             // 绘制颜色圆圈
-            let circle_radius = 6.0;
-            let circle_x = legend_x + margin + circle_radius;
-            let circle_y = current_y;
+            let circle_radius = 5.0;
+            let circle_x = legend_x + padding + circle_radius;
             painter.circle_filled(
-                pos2(circle_x, circle_y),
+                pos2(circle_x, current_y),
                 circle_radius,
                 color,
             );
             // 如果是白色，添加边框以便看清
             if color == Color32::from_rgb(255, 255, 255) {
                 painter.circle_stroke(
-                    pos2(circle_x, circle_y),
+                    pos2(circle_x, current_y),
                     circle_radius,
                     (1.0, Color32::GRAY),
                 );
@@ -2660,59 +4024,61 @@ impl VennCVApp {
             
             // 绘制文本
             painter.text(
-                pos2(circle_x + circle_radius + 8.0, circle_y),
+                pos2(circle_x + circle_radius + 6.0, current_y),
                 Align2::LEFT_CENTER,
                 name,
-                FontId::proportional(10.0),
+                FontId::proportional(9.0),
                 Color32::BLACK,
             );
             
-            current_y += item_height + spacing;
+            current_y += item_height / 2.0 + spacing;
         }
         
         // 绘制完成度图例
-        current_y += section_spacing - spacing;
+        current_y += section_spacing;
+        current_y += section_title_height / 2.0;
         painter.text(
-            pos2(legend_x + margin, current_y),
+            pos2(legend_x + padding, current_y),
             Align2::LEFT_CENTER,
             "完成度:",
-            FontId::proportional(11.0),
+            FontId::proportional(10.0),
             Color32::DARK_GRAY,
         );
-        current_y += item_height;
+        current_y += section_title_height / 2.0;
         
         let completion_examples = [0.0, 50.0, 100.0];
         for percentage in &completion_examples {
             let color = self.completion_percentage_to_color(*percentage);
-            let label = format!("{}%", percentage);
+            let label = format!("{}%", *percentage as i32);
+            
+            current_y += item_height / 2.0;
             
             // 绘制颜色圆圈（带边框）
-            let circle_radius = 6.0;
-            let circle_x = legend_x + margin + circle_radius;
-            let circle_y = current_y;
+            let circle_radius = 5.0;
+            let circle_x = legend_x + padding + circle_radius;
             // 先绘制白色填充
             painter.circle_filled(
-                pos2(circle_x, circle_y),
+                pos2(circle_x, current_y),
                 circle_radius,
                 Color32::WHITE,
             );
             // 绘制完成度颜色作为边框
             painter.circle_stroke(
-                pos2(circle_x, circle_y),
+                pos2(circle_x, current_y),
                 circle_radius,
                 (2.0, color),
             );
             
             // 绘制文本
             painter.text(
-                pos2(circle_x + circle_radius + 8.0, circle_y),
+                pos2(circle_x + circle_radius + 6.0, current_y),
                 Align2::LEFT_CENTER,
                 &label,
-                FontId::proportional(10.0),
+                FontId::proportional(9.0),
                 Color32::BLACK,
             );
             
-            current_y += item_height + spacing;
+            current_y += item_height / 2.0 + spacing;
         }
     }
 
@@ -3082,6 +4448,83 @@ impl VennCVApp {
             });
     }
     
+    /// 图例设置对话框
+    fn legend_settings_dialog(&mut self, ctx: &Context) {
+        let theme = Theme::light();
+        
+        egui::Window::new("图例设置")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .fixed_size([280.0, 200.0])
+            .frame(Frame::window(&ctx.style()).fill(theme.background))
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.add_space(8.0);
+                    
+                    // 显示/隐藏图例
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("显示图例")
+                                .size(12.0)
+                                .color(theme.text_primary)
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.checkbox(&mut self.settings.show_legend, "");
+                        });
+                    });
+                    
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    
+                    // 重置位置按钮
+                    if ui.add_sized(
+                        [ui.available_width(), 28.0],
+                        Button::new(
+                            RichText::new("重置图例位置")
+                                .size(12.0)
+                                .color(theme.text_primary)
+                        )
+                        .fill(theme.surface)
+                    ).clicked() {
+                        self.legend_position = Vec2::ZERO;
+                    }
+                    
+                    ui.add_space(16.0);
+                    
+                    // 提示信息
+                    ui.label(
+                        RichText::new("提示：可以拖拽图例调整位置")
+                            .size(10.0)
+                            .color(theme.text_secondary)
+                    );
+                    
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    
+                    // 关闭按钮
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add_sized(
+                                [80.0, 28.0],
+                                Button::new(
+                                    RichText::new("关闭")
+                                        .size(12.0)
+                                        .color(Color32::WHITE)
+                                )
+                                .fill(theme.primary)
+                            ).clicked() {
+                                self.save_settings();
+                                self.show_legend_settings = false;
+                            }
+                        });
+                    });
+                });
+            });
+    }
+    
     /// 加载应用设置
     fn load_settings(&mut self) {
         let settings_path = "app_settings.yaml";
@@ -3109,8 +4552,8 @@ impl VennCVApp {
     
     /// 为admin用户创建复杂的初始数据（用于展示功能）
     fn create_admin_initial_data(&self) -> AppData {
-        let mut fields = HashMap::new();
-        let mut projects = HashMap::new();
+        let mut fields = indexmap::IndexMap::new();
+        let mut projects = indexmap::IndexMap::new();
         let mut relations = Vec::new();
         let mut relation_tags = vec![
             "依赖".to_string(),
@@ -3261,12 +4704,56 @@ impl VennCVApp {
 
 impl eframe::App for VennCVApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // 在所有UI渲染之前消耗Tab键并处理，防止egui默认焦点切换
+        if self.is_logged_in {
+            // 清除egui的焦点，防止Tab键导航到UI元素
+            ctx.memory_mut(|m| m.request_focus(egui::Id::NULL));
+            
+            // 消耗Tab键事件并获取状态
+            let tab_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab));
+            let shift_tab_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, Key::Tab));
+            let cmd_tab_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::MAC_CMD, Key::Tab));
+            
+            // 处理Tab键逻辑
+            if cmd_tab_pressed {
+                if self.toolbar_focus_index.is_some() {
+                    self.toolbar_focus_index = None;
+                } else {
+                    self.toolbar_focus_index = Some(0);
+                }
+            } else if tab_pressed {
+                if self.toolbar_focus_index.is_some() {
+                    let toolbar_count = 9;
+                    self.toolbar_focus_index = Some(match self.toolbar_focus_index {
+                        Some(idx) => (idx + 1) % toolbar_count,
+                        None => 0,
+                    });
+                } else {
+                    self.next_project();
+                }
+            } else if shift_tab_pressed {
+                if self.toolbar_focus_index.is_some() {
+                    let toolbar_count = 9;
+                    self.toolbar_focus_index = Some(match self.toolbar_focus_index {
+                        Some(idx) => if idx == 0 { toolbar_count - 1 } else { idx - 1 },
+                        None => toolbar_count - 1,
+                    });
+                } else {
+                    self.previous_project();
+                }
+            }
+        }
+        
         if !self.is_logged_in {
             self.login_ui(ctx);
         } else {
             // 显示设置对话框（在main_ui之前，确保对话框在最上层）
             if self.show_settings_dialog {
                 self.settings_dialog(ctx);
+            }
+            // 显示图例设置对话框
+            if self.show_legend_settings {
+                self.legend_settings_dialog(ctx);
             }
             self.main_ui(ctx);
         }
