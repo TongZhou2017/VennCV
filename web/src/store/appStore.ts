@@ -700,7 +700,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!p) continue;
       if (hidden) next.projects[id] = { ...p, canvas_hidden: true };
       else {
-        const { canvas_hidden: _ch, ...rest } = p;
+        const rest = { ...p };
+        delete rest.canvas_hidden;
         next.projects[id] = rest as Project;
       }
     }
