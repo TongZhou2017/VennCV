@@ -1,3 +1,4 @@
+# 示例：复制为运行目录下的 app_settings.yaml（遗留 egui 路径会读写该文件名）。勿将含隐私的本地副本提交到版本库。
 auto_save: false
 auto_save_interval: 300
 default_zoom: 0.9

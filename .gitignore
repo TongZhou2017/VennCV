@@ -1,7 +1,53 @@
 # Rust
 /target/
+src-tauri/target/
 **/*.rs.bk
-Cargo.lock
+# 应用程序与 Tauri：锁定依赖版本，建议提交 Cargo.lock（勿再忽略）
+
+# 构建产物
+/dist/
+legacy/wasm/dist/
+web/dist/
+web/dist-ssr/
+
+# 可能被复制到仓库根目录的 Trunk / wasm-bindgen 输出（正常应在 dist/ 或 target/）
+/*.wasm
+/*_bg.wasm
+
+# Node（根目录 Tauri CLI）
+/node_modules/
+
+# Playwright / Node (e2e)
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/playwright/.cache/
+e2e/.auth/
+
+# 日志与本地调试输出
+*.log
+logs/
+
+# 环境变量（勿提交密钥）
+.env
+.env.local
+.env.*.local
+
+# 前端与 Node 缓存
+.vite/
+.turbo/
+*.tsbuildinfo
+.eslintcache
+coverage/
+.vitest/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tgz
+
+# 源码映射（若误从构建目录复制到源码树）
+*.map
 
 # IDE
 .idea/
@@ -13,14 +59,30 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+._*
 
-# 数据文件（可选，根据需要调整）
-*.json
+# Windows / 本地调试可能散落的二进制（正式产物应在 target/ 或 Release 安装包中）
+*.exe
+*.pdb
+*.ilk
+*.obj
 
-# 用户配置文件（包含用户信息）
+# 同步工具冲突副本（如 Syncthing）
+*.sync-conflict-*
+
+# 用户配置与本地数据（勿提交）
 config.yaml
+app_settings.yaml
+# 遗留桌面端若在仓库根目录启动，可能在当前工作目录生成 users/
+/users/
 
-# 开发文档（不用于git和cargo发布）
+# 易误放在仓库根目录的导出文件（应用默认导出名为 venncv_export.json 等）
+/venncv_export*.json
+
+# 个人笔记（不参与发布）
 DEVELOPMENT_NOTES.md
 VERSION_HISTORY.md
 CHAT_REQUIREMENTS.md
+
+# 开发历程与内部记录（路线图、调试清单、日志设计稿等，非用户使用说明；仅本地保留或私有备份，不随仓库分发）
+/docs/

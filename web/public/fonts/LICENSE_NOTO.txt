@@ -1,0 +1,2 @@
+Noto Sans SC（本目录下的 NotoSansSC-Regular.otf）来自 Google Noto CJK，授权为 SIL Open Font License 1.1。
+完整许可与版权说明见：https://github.com/googlefonts/noto-cjk

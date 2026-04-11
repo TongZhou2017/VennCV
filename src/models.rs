@@ -27,7 +27,7 @@ impl ProjectStatus {
             ProjectStatus::Published => "已发表",
             ProjectStatus::Submitted => "投稿中",
             ProjectStatus::HighPriority => "优先做",
-            ProjectStatus::SteadyProgress => "进行中",
+            ProjectStatus::SteadyProgress => "稳步做",
             ProjectStatus::ToBeStarted => "待启动",
         }
     }
@@ -143,6 +143,9 @@ pub struct AppSettings {
     pub visualization_bg_color: [u8; 4],  // 可视化背景颜色 RGBA
     #[serde(default = "default_show_legend")]
     pub show_legend: bool,  // 是否显示图例
+    /// 桌面端：用户库根目录（其下存放 config.yaml 与 users/）。空字符串表示使用程序当前工作目录。
+    #[serde(default)]
+    pub user_files_directory: String,
 }
 
 fn default_auto_save() -> bool { false }
@@ -169,6 +172,7 @@ impl Default for AppSettings {
             project_border_width: 3.0,
             visualization_bg_color: [255, 255, 255, 255],
             show_legend: true,
+            user_files_directory: String::new(),
         }
     }
 }
@@ -266,6 +270,60 @@ impl AppData {
             relations: Vec::new(),
             relation_tags: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_status_name_stable() {
+        assert_eq!(ProjectStatus::Published.name(), "已发表");
+        assert_eq!(ProjectStatus::ToBeStarted.name(), "待启动");
+    }
+
+    #[test]
+    fn appdata_default_empty_roundtrip_json() {
+        let empty = AppData::default_empty();
+        let json = serde_json::to_string(&empty).unwrap();
+        let back: AppData = serde_json::from_str(&json).unwrap();
+        assert!(back.fields.is_empty());
+        assert!(back.projects.is_empty());
+        assert!(back.relations.is_empty());
+    }
+
+    #[test]
+    fn project_roundtrip_json() {
+        let p = Project {
+            id: "project_1".to_string(),
+            name: "测试".to_string(),
+            description: "d".to_string(),
+            status: ProjectStatus::Submitted,
+            field_ids: vec!["f1".to_string()],
+            position: (10.0, 20.0),
+            radius: 15.0,
+            completion_percentage: 50.0,
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Project = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, p.id);
+        assert!(matches!(back.status, ProjectStatus::Submitted));
+    }
+
+    #[test]
+    fn relation_type_json_roundtrip() {
+        let r = ProjectRelation {
+            from_id: "a".to_string(),
+            to_id: "b".to_string(),
+            relation_type: RelationType::Indirect,
+            tags: vec!["t".to_string()],
+            color: [1, 2, 3, 255],
+            width: 1.5,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        let back: ProjectRelation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.relation_type, RelationType::Indirect);
     }
 }
 

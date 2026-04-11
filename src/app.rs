@@ -1,12 +1,15 @@
 use crate::models::*;
 use egui::*;
-use std::collections::HashMap;
 
 // 导入默认值函数
 use crate::models::{default_relation_color, default_relation_width};
 
-// IDE风格主题系统 - 参考VSCode/Cursor设计
-struct Theme {
+/// 窗口标题基准文案；登录后在标题中追加当前用户名。
+const VIEWPORT_TITLE_BASE: &str = "科研项目管理系统 - VennCV";
+
+// IDE风格主题系统 - 参考VSCode/Cursor设计（预留字段供后续深色主题等使用）
+#[allow(dead_code)]
+pub(crate) struct Theme {
     // 主色调 - VSCode风格
     primary: Color32,              // 主按钮颜色
     primary_hover: Color32,        // 主按钮悬停
@@ -14,18 +17,18 @@ struct Theme {
     
     // 背景色 - 类似VSCode编辑器
     background: Color32,            // 主背景
-    surface: Color32,              // 面板背景
+    pub(crate) surface: Color32,   // 面板背景
     surface_hover: Color32,        // 悬停背景
     surface_selected: Color32,     // 选中背景
     
     // 文本颜色
     text_primary: Color32,         // 主文本
-    text_secondary: Color32,       // 次要文本
+    pub(crate) text_secondary: Color32, // 次要文本
     text_disabled: Color32,        // 禁用文本
     
     // 边框和分隔线
     border: Color32,               // 边框颜色
-    divider: Color32,              // 分隔线
+    pub(crate) divider: Color32,   // 分隔线
     
     // 状态颜色
     success: Color32,
@@ -34,7 +37,7 @@ struct Theme {
     info: Color32,
     
     // 特殊用途
-    selection: Color32,            // 选中高亮
+    pub(crate) selection: Color32, // 选中高亮
     selection_inactive: Color32,   // 非活动选中
 }
 
@@ -68,7 +71,8 @@ impl Theme {
         }
     }
     
-    // VSCode Dark+ 风格主题
+    // VSCode Dark+ 风格主题（预留）
+    #[allow(dead_code)]
     fn dark() -> Self {
         Self {
             primary: Color32::from_rgb(0, 122, 204),        // VSCode蓝色
@@ -100,16 +104,19 @@ impl Theme {
     fn apply_visuals(&self, ctx: &Context) {
         let mut style = (*ctx.style()).clone();
         
-        // 按钮样式 - 更扁平化，小圆角
-        style.visuals.widgets.inactive.bg_fill = self.primary;
-        style.visuals.widgets.inactive.weak_bg_fill = self.surface;
-        style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, Color32::WHITE);
-        style.visuals.widgets.inactive.rounding = Rounding::same(3.0); // 小圆角
-        
-        style.visuals.widgets.hovered.bg_fill = self.primary_hover;
+        // 默认控件：浅底 + 主色文字（菜单、下拉、次要按钮）；避免整块主色底导致菜单/复选框过于抢眼。
+        // 主操作仍用 Button::fill(self.primary) + 白字。
+        style.visuals.widgets.inactive.bg_fill = self.surface;
+        style.visuals.widgets.inactive.weak_bg_fill = self.background;
+        style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, self.text_primary);
+        style.visuals.widgets.inactive.rounding = Rounding::same(3.0);
+
+        style.visuals.widgets.hovered.bg_fill = self.surface_hover;
+        style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, self.text_primary);
         style.visuals.widgets.hovered.rounding = Rounding::same(3.0);
-        
-        style.visuals.widgets.active.bg_fill = self.primary_active;
+
+        style.visuals.widgets.active.bg_fill = self.surface_selected;
+        style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, self.text_primary);
         style.visuals.widgets.active.rounding = Rounding::same(3.0);
         
         // 文本样式 - 更专业的字体大小
@@ -137,6 +144,20 @@ impl Theme {
         
         ctx.set_style(style);
     }
+}
+
+/// 浏览器（wasm）下文件对话框不可用时的 JSON 导入/导出 UI。
+#[derive(Debug)]
+pub enum WebFileUi {
+    /// `replace_workspace`: true=打开/加载（替换），false=导入（合并）
+    Import {
+        draft: String,
+        replace_workspace: bool,
+    },
+    Export {
+        suggested_name: String,
+        body: String,
+    },
 }
 
 pub struct VennCVApp {
@@ -174,6 +195,7 @@ pub struct VennCVApp {
     pub editing_field: Option<ResearchField>,
     pub expanded_relations: std::collections::HashMap<usize, bool>,  // 关系展开状态
     pub relation_tag_inputs: std::collections::HashMap<usize, String>,  // 每个关系的标签输入框内容
+    pub project_edit_buffer: Option<Project>,  // 独立的项目编辑缓冲区，用于文本字段编辑
     
     // 设置
     pub show_settings_dialog: bool,  // 是否显示设置对话框
@@ -199,6 +221,23 @@ pub struct VennCVApp {
     
     // 工具栏按钮选中状态
     pub toolbar_focus_index: Option<usize>,  // 当前选中的工具栏按钮索引
+
+    /// 浏览器版：JSON 文本导入/导出窗口
+    pub web_file_ui: Option<WebFileUi>,
+
+    // 帮助对话框
+    pub show_shortcuts_dialog: bool,
+    pub show_about_dialog: bool,
+
+    /// 仅 WebAssembly：URL 含 `venncv_e2e` 时启用（自动登录 + 登录成功后写入 `window.venncvE2e`）。
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    e2e_from_url: bool,
+    /// 尚未执行首帧自动登录时为 true（与 `e2e_from_url` 同时生效）。
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    e2e_auto_login_pending: bool,
+    /// E2E：登录后主界面已绘制若干帧后递增，用于写入 `venncvE2e.phase`。
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    e2e_ui_frames_after_login: u8,
 }
 
 impl Default for VennCVApp {
@@ -222,6 +261,7 @@ impl Default for VennCVApp {
             max_history_size: 50,
             selected_project: None,
             selected_field: None,
+            project_edit_buffer: None,
             show_project_table: true,
             show_visualization: true,
             show_property_panel: true,
@@ -242,6 +282,12 @@ impl Default for VennCVApp {
             show_legend_settings: false,
             field_section_height: 100.0,  // 领域区域默认高度
             toolbar_focus_index: None,  // 工具栏按钮无选中
+            web_file_ui: None,
+            show_shortcuts_dialog: false,
+            show_about_dialog: false,
+            e2e_from_url: false,
+            e2e_auto_login_pending: false,
+            e2e_ui_frames_after_login: 0,
         }
     }
 }
@@ -253,22 +299,364 @@ impl VennCVApp {
         theme.apply_visuals(&cc.egui_ctx);
         
         let mut app = Self::default();
-        app.load_available_users();
         app.load_settings();
+        app.load_available_users();
         // 应用设置到应用状态
         app.max_history_size = app.settings.max_history_size;
         app.visualization_zoom = app.settings.default_zoom;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let e2e = Self::wasm_url_has_venncv_e2e();
+            app.e2e_from_url = e2e;
+            app.e2e_auto_login_pending = e2e;
+        }
         app
     }
 
-    /// 加载可用用户列表
+    /// 加载可用用户列表（排序后显示，下拉顺序稳定、易找）
     fn load_available_users(&mut self) {
         self.available_users.clear();
         if let Ok(config) = self.load_config() {
             for user in &config.users {
                 self.available_users.push(user.username.clone());
             }
+            self.available_users.sort_unstable();
         }
+    }
+
+    /// 登录后无有效数据文件时使用：空工作区（数据来自已存文件或导入）。
+    fn init_workspace_for_current_login(&mut self, _username: &str) {
+        self.data = AppData::default_empty();
+        self.selected_project = None;
+        self.editing_project = None;
+        self.project_edit_buffer = None;
+        self.history = vec![self.data.clone()];
+        self.history_index = 0;
+    }
+
+    /// 生成不与现有 key 冲突的领域 id（`field_{len+1}` 在删除后易与已有 id 重复，导致 insert 覆盖旧项）
+    pub(crate) fn alloc_new_field_id(fields: &indexmap::IndexMap<String, ResearchField>) -> String {
+        let max_suffix = fields
+            .keys()
+            .filter_map(|k| k.strip_prefix("field_").and_then(|s| s.parse::<u64>().ok()))
+            .max()
+            .unwrap_or(0);
+        let mut n = max_suffix.saturating_add(1).max(1);
+        loop {
+            let id = format!("field_{}", n);
+            if !fields.contains_key(&id) {
+                return id;
+            }
+            n += 1;
+        }
+    }
+
+    /// 清除配置中该用户的「最近编辑文件」（文件已丢或损坏时避免反复踩坑）
+    fn clear_last_edited_file_for_username(&self, username: &str) {
+        if let Ok(mut config) = self.load_config() {
+            let mut changed = false;
+            for u in &mut config.users {
+                if u.username == username {
+                    if u.last_edited_file.take().is_some() {
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+            if changed {
+                let _ = self.save_config(&config);
+            }
+        }
+    }
+
+    /// `config.yaml`、`users/` 等相对路径解析为本机路径（桌面）；留空则相对当前工作目录。
+    fn resolve_data_path(&self, relative: &str) -> std::path::PathBuf {
+        let rel = relative.trim_start_matches("./").replace('\\', "/");
+        #[cfg(target_arch = "wasm32")]
+        {
+            return std::path::PathBuf::from(rel);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = self.settings.user_files_directory.trim();
+            if !root.is_empty() {
+                std::path::Path::new(root).join(&rel)
+            } else {
+                std::path::PathBuf::from(rel)
+            }
+        }
+    }
+
+    /// 逻辑路径（如 users/admin/workspace.json）或已是绝对路径时，得到 platform 层使用的路径字符串。
+    fn resolve_path_key_for_io(&self, path_str: &str) -> String {
+        use std::path::Path;
+        let p = Path::new(path_str);
+        if p.is_absolute() {
+            path_str.to_string()
+        } else {
+            self.resolve_data_path(path_str).to_string_lossy().to_string()
+        }
+    }
+
+    /// `users/<用户名>/workspace.json` 的路径；用户名含路径分隔符时返回 `None`。
+    /// 返回 (逻辑 user 目录 users/name, 用于 I/O 的绝对/解析路径字符串, workspace PathBuf)。
+    fn user_workspace_file_paths(&self, username: &str) -> Option<(String, String, std::path::PathBuf)> {
+        if username.is_empty()
+            || username.contains('/')
+            || username.contains('\\')
+            || username.contains("..")
+        {
+            return None;
+        }
+        let user_dir_rel = format!("users/{}", username);
+        let workspace_rel = format!("{}/workspace.json", user_dir_rel);
+        let workspace_abs = self.resolve_data_path(&workspace_rel);
+        let workspace_key = workspace_abs.to_string_lossy().to_string();
+        Some((user_dir_rel, workspace_key, workspace_abs))
+    }
+
+    /// 登录后若没有从「最近文件」打开数据：使用稳定工作区文件，避免 admin 等用户一直显示「未保存」且无法记住进度。
+    fn ensure_user_workspace_after_login(&mut self, username: &str) {
+        let Some((user_dir_rel, workspace_key, workspace_path)) = self.user_workspace_file_paths(username)
+        else {
+            self.init_workspace_for_current_login(username);
+            return;
+        };
+
+        if crate::platform::exists(&workspace_key) {
+            match crate::platform::read_to_string(&workspace_key) {
+                Ok(content) => match serde_json::from_str::<AppData>(&content) {
+                    Ok(data) => {
+                        self.data = data;
+                        self.selected_project = None;
+                        self.editing_project = None;
+                        self.project_edit_buffer = None;
+                        self.validate_and_fix_project_positions();
+                        self.history = vec![self.data.clone()];
+                        self.history_index = 0;
+                        self.current_file_path = Some(workspace_path.clone());
+                        if self.user_data_storage_path.is_none() {
+                            self.user_data_storage_path = Some(
+                                self.resolve_data_path(&format!("users/{}", username))
+                                    .to_string_lossy()
+                                    .to_string(),
+                            );
+                        }
+                        self.merge_user_storage_defaults_in_config(username, &user_dir_rel);
+                        self.update_last_edited_file(&workspace_path);
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "工作区文件损坏，已用默认数据重建 workspace.json: {}",
+                            e
+                        );
+                        self.init_workspace_for_current_login(username);
+                        self.write_fresh_user_workspace(username, &user_dir_rel, &workspace_key, &workspace_path);
+                    }
+                },
+                Err(e) => {
+                    log::warn!("无法读取工作区文件，重建: {}", e);
+                    self.init_workspace_for_current_login(username);
+                    self.write_fresh_user_workspace(username, &user_dir_rel, &workspace_key, &workspace_path);
+                }
+            }
+        } else {
+            self.init_workspace_for_current_login(username);
+            self.write_fresh_user_workspace(username, &user_dir_rel, &workspace_key, &workspace_path);
+        }
+    }
+
+    fn merge_user_storage_defaults_in_config(&self, username: &str, user_dir: &str) {
+        if let Ok(mut config) = self.load_config() {
+            let mut changed = false;
+            for u in &mut config.users {
+                if u.username == username {
+                    if u.data_storage_path.is_none() {
+                        u.data_storage_path = Some(user_dir.to_string());
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+            if changed {
+                let _ = self.save_config(&config);
+            }
+        }
+    }
+
+    fn write_fresh_user_workspace(
+        &mut self,
+        username: &str,
+        user_dir_rel: &str,
+        workspace_key: &str,
+        workspace_path: &std::path::Path,
+    ) {
+        let user_dir_phys = self.resolve_data_path(user_dir_rel);
+        let user_dir_phys_s = user_dir_phys.to_string_lossy().to_string();
+        if let Err(e) = crate::platform::create_dir_all(&user_dir_phys_s) {
+            log::warn!("创建工作区目录失败: {}", e);
+            self.current_file_path = None;
+            return;
+        }
+        match serde_json::to_string_pretty(&self.data) {
+            Ok(json) => {
+                if let Err(e) = crate::platform::write(workspace_key, json.as_bytes()) {
+                    log::warn!("写入默认工作区失败: {}", e);
+                    self.current_file_path = None;
+                    return;
+                }
+                self.current_file_path = Some(workspace_path.to_path_buf());
+                if self.user_data_storage_path.is_none() {
+                    self.user_data_storage_path = Some(user_dir_phys_s);
+                }
+                self.merge_user_storage_defaults_in_config(username, user_dir_rel);
+                self.update_last_edited_file(workspace_path);
+            }
+            Err(e) => {
+                log::warn!("序列化工作区失败: {}", e);
+                self.current_file_path = None;
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_url_has_venncv_e2e() -> bool {
+        let Some(win) = web_sys::window() else {
+            return false;
+        };
+        let search = match win.location().search() {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let q = search.trim_start_matches('?');
+        q.split('&').any(|p| p == "venncv_e2e" || p.starts_with("venncv_e2e="))
+    }
+
+    /// 供 Playwright / Cursor 浏览器自动化读取：`window.venncvE2e.state`（及后续 `phase` 等字段）。
+    #[cfg(target_arch = "wasm32")]
+    fn e2e_publish_state(state: &str) {
+        use js_sys::Reflect;
+        use wasm_bindgen::JsValue;
+        let Some(win) = web_sys::window() else {
+            return;
+        };
+        let obj = js_sys::Object::new();
+        let _ = Reflect::set(&obj, &JsValue::from_str("state"), &JsValue::from_str(state));
+        let _ = Reflect::set(&win, &JsValue::from_str("venncvE2e"), &obj.into());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn e2e_merge_venncv_field(key: &str, value: &str) {
+        use js_sys::{Object, Reflect};
+        use wasm_bindgen::JsValue;
+        let Some(win) = web_sys::window() else {
+            return;
+        };
+        let base = Reflect::get(&win, &JsValue::from_str("venncvE2e")).ok();
+        let obj = if let Some(v) = base {
+            if v.is_object() && !v.is_null() {
+                v
+            } else {
+                Object::new().into()
+            }
+        } else {
+            Object::new().into()
+        };
+        let _ = Reflect::set(&obj, &JsValue::from_str(key), &JsValue::from_str(value));
+        let _ = Reflect::set(&win, &JsValue::from_str("venncvE2e"), &obj);
+    }
+
+    /// 执行登录表单提交（与「登录」按钮、回车相同逻辑）。
+    fn process_login_submission(&mut self) {
+        if self.login_username.is_empty() || self.login_password.is_empty() {
+            self.login_error = "用户名和密码不能为空".to_string();
+            return;
+        }
+        match self.verify_user(&self.login_username, &self.login_password) {
+            Ok(Some((storage_path, last_edited_file))) => {
+                let username_for_init = self.login_username.clone();
+                self.is_logged_in = true;
+                self.current_user = Some(username_for_init.clone());
+                self.user_data_storage_path =
+                    storage_path.map(|s| self.resolve_path_key_for_io(&s));
+                self.login_error.clear();
+                self.login_password.clear();
+
+                let mut loaded_from_file = false;
+                if let Some(file_path) = last_edited_file {
+                    let pkey = self.resolve_path_key_for_io(&file_path);
+                    let path = std::path::PathBuf::from(&pkey);
+                    if crate::platform::exists(&pkey) {
+                        match crate::platform::read_to_string(&pkey) {
+                            Ok(content) => {
+                                match serde_json::from_str::<AppData>(&content) {
+                                    Ok(data) => {
+                                        self.data = data.clone();
+                                        self.current_file_path = Some(path);
+                                        self.selected_project = None;
+                                        self.editing_project = None;
+                                        self.project_edit_buffer = None;
+                                        self.validate_and_fix_project_positions();
+                                        self.history = vec![self.data.clone()];
+                                        self.history_index = 0;
+                                        loaded_from_file = true;
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "最近编辑文件无法解析为数据，改用空白工作区并清除记录: {}",
+                                            e
+                                        );
+                                        self.current_file_path = None;
+                                        self.clear_last_edited_file_for_username(&username_for_init);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "无法读取最近编辑文件，改用空白工作区并清除记录: {}",
+                                    e
+                                );
+                                self.current_file_path = None;
+                                self.clear_last_edited_file_for_username(&username_for_init);
+                            }
+                        }
+                    } else {
+                        log::warn!(
+                            "最近编辑文件已不存在，改用空白工作区并清除记录: {}",
+                            file_path
+                        );
+                        self.current_file_path = None;
+                        self.clear_last_edited_file_for_username(&username_for_init);
+                    }
+                }
+                if !loaded_from_file {
+                    self.ensure_user_workspace_after_login(&username_for_init);
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if self.e2e_from_url {
+                        Self::e2e_publish_state("logged_in");
+                    }
+                }
+            }
+            Ok(None) => {
+                self.login_error = "用户名或密码错误".to_string();
+            }
+            Err(e) => {
+                self.login_error = format!("登录失败: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn run_e2e_auto_login_if_pending(&mut self) {
+        if !self.e2e_auto_login_pending || self.is_logged_in || self.show_create_user_dialog {
+            return;
+        }
+        self.e2e_auto_login_pending = false;
+        self.login_username = "admin".to_string();
+        self.login_password = "admin".to_string();
+        self.process_login_submission();
     }
 
     fn login_ui(&mut self, ctx: &Context) {
@@ -280,6 +668,7 @@ impl VennCVApp {
                 .collapsible(false)
                 .resizable(false)
                 .default_size([400.0, 300.0])
+                .frame(Frame::window(&*ctx.style()).stroke(Stroke::new(1.0, theme.border)))
                 .show(ctx, |ui| {
                     ui.set_width(400.0);
                     ui.vertical_centered(|ui| {
@@ -293,6 +682,7 @@ impl VennCVApp {
                             ui.add(
                                 TextEdit::singleline(&mut self.new_username)
                                     .desired_width(200.0)
+                                    .id(Id::new("new_username_edit"))
                             );
                         });
 
@@ -305,6 +695,7 @@ impl VennCVApp {
                                 TextEdit::singleline(&mut self.new_password)
                                     .password(true)
                                     .desired_width(200.0)
+                                    .id(Id::new("new_password_edit"))
                             );
                         });
 
@@ -387,7 +778,13 @@ impl VennCVApp {
                                 .size(13.0)
                                 .color(theme.text_secondary)
                         );
-                        ui.add_space(40.0);
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("提示：默认账号为 admin / admin，或点击下方「创建用户」")
+                                .size(11.0)
+                                .color(theme.text_secondary),
+                        );
+                        ui.add_space(28.0);
 
                         // 用户选择 - 更简洁的布局
                         ui.vertical(|ui| {
@@ -436,6 +833,7 @@ impl VennCVApp {
                                 TextEdit::singleline(&mut self.login_password)
                                     .password(true)
                                     .desired_width(ui.available_width())
+                                    .id(Id::new("login_password_edit"))
                             );
                         });
 
@@ -450,91 +848,42 @@ impl VennCVApp {
 
                         ui.add_space(24.0);
                         
-                        // 回车键触发登录
-                        let enter_pressed = ctx.input(|i| i.key_pressed(Key::Enter));
+                        // 回车键触发登录（创建用户对话框打开时勿触发，避免在子窗口输入时被误登录）
+                        let enter_pressed = !self.show_create_user_dialog
+                            && ctx.input(|i| i.key_pressed(Key::Enter));
 
-                        // 按钮组 - 更简洁的样式
+                        // 按钮组（登录/创建用户始终参与布局，避免回车短路求值导致本行宽度跳动）
                         ui.horizontal(|ui| {
-                            if enter_pressed || ui.add_sized(
-                                [ui.available_width() / 2.0 - 4.0, 32.0],
-                                Button::new(RichText::new("登录").size(13.0).color(Color32::WHITE))
-                                    .fill(theme.primary)
-                            ).clicked() {
-                                if self.login_username.is_empty() || self.login_password.is_empty() {
-                                    self.login_error = "用户名和密码不能为空".to_string();
-                                } else {
-                                    match self.verify_user(&self.login_username, &self.login_password) {
-                                        Ok(Some((storage_path, last_edited_file))) => {
-                                            self.is_logged_in = true;
-                                            self.current_user = Some(self.login_username.clone());
-                                            self.user_data_storage_path = storage_path;
-                                            self.login_error.clear();
-                                            
-                                            // 自动加载最近编辑的文件
-                                            if let Some(file_path) = last_edited_file {
-                                                let path = std::path::PathBuf::from(&file_path);
-                                                if path.exists() {
-                                                    if let Ok(content) = std::fs::read_to_string(&path) {
-                                                        match serde_json::from_str::<AppData>(&content) {
-                                                            Ok(data) => {
-                                                                self.data = data.clone();
-                                                                self.current_file_path = Some(path);
-                                                                self.selected_project = None;
-                                                                self.editing_project = None;
-                                                                // 验证并修正项目位置
-                                                                self.validate_and_fix_project_positions();
-                                                                // 重置历史（使用修正后的数据）
-                                                                self.history = vec![self.data.clone()];
-                                                                self.history_index = 0;
-                                                            }
-                                                            Err(e) => {
-                                                                eprintln!("加载最近编辑文件失败: {}", e);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                // 如果没有最近编辑的文件，根据用户类型初始化数据
-                                                if self.login_username == "admin" {
-                                                    // admin用户：加载复杂的初始数据
-                                                    self.data = self.create_admin_initial_data();
-                                                    self.selected_project = None;
-                                                    self.editing_project = None;
-                                                    // 重置历史
-                                                    self.history = vec![self.data.clone()];
-                                                    self.history_index = 0;
-                                                } else {
-                                                    // 新用户：使用空数据
-                                                    self.data = AppData::default_empty();
-                                                    self.selected_project = None;
-                                                    self.editing_project = None;
-                                                    // 重置历史
-                                                    self.history = vec![self.data.clone()];
-                                                    self.history_index = 0;
-                                                }
-                                            }
-                                        }
-                                        Ok(None) => {
-                                            self.login_error = "用户名或密码错误".to_string();
-                                        }
-                                        Err(e) => {
-                                            self.login_error = format!("登录失败: {}", e);
-                                        }
-                                    }
-                                }
-                            }
+                            let login_clicked = ui
+                                .add_sized(
+                                    [ui.available_width() / 2.0 - 4.0, 32.0],
+                                    Button::new(
+                                        RichText::new("登录").size(13.0).color(Color32::WHITE),
+                                    )
+                                    .fill(theme.primary),
+                                )
+                                .clicked();
 
                             ui.add_space(8.0);
 
-                            if ui.add_sized(
-                                [ui.available_width(), 32.0],
-                                Button::new(RichText::new("创建用户").size(13.0).color(theme.text_primary))
-                                    .fill(theme.surface)
-                            ).clicked() {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), 32.0],
+                                    Button::new(
+                                        RichText::new("创建用户").size(13.0).color(theme.text_primary),
+                                    )
+                                    .fill(theme.surface),
+                                )
+                                .clicked()
+                            {
                                 self.show_create_user_dialog = true;
                                 self.new_username.clear();
                                 self.new_password.clear();
                                 self.create_user_error.clear();
+                            }
+
+                            if enter_pressed || login_clicked {
+                                self.process_login_submission();
                             }
                         });
                     });
@@ -543,6 +892,8 @@ impl VennCVApp {
     }
 
     fn main_ui(&mut self, ctx: &Context) {
+        self.render_web_file_ui(ctx);
+
         // 处理快捷键
         self.handle_shortcuts(ctx);
         
@@ -584,6 +935,9 @@ impl VennCVApp {
                         // 清除当前文件路径，避免跨用户文件混乱
                         self.current_file_path = None;
                         self.user_data_storage_path = None;
+                        self.login_password.clear();
+                        self.login_error.clear();
+                        self.load_available_users();
                     }
                     ui.separator();
                     if ui.button("退出登录").clicked() {
@@ -592,6 +946,9 @@ impl VennCVApp {
                         // 清除当前文件路径，避免跨用户文件混乱
                         self.current_file_path = None;
                         self.user_data_storage_path = None;
+                        self.login_password.clear();
+                        self.login_error.clear();
+                        self.load_available_users();
                     }
                 });
 
@@ -626,6 +983,14 @@ impl VennCVApp {
                     }
                 });
 
+                ui.menu_button("帮助", |ui| {
+                    if ui.button("快捷键一览…").clicked() {
+                        self.show_shortcuts_dialog = true;
+                    }
+                    if ui.button("关于 VennCV…").clicked() {
+                        self.show_about_dialog = true;
+                    }
+                });
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let Some(user) = &self.current_user {
@@ -690,6 +1055,7 @@ impl VennCVApp {
                             // 清除选中状态
                             self.selected_project = None;
                             self.editing_project = None;
+                            self.project_edit_buffer = None;
                             // 保存到历史
                             self.save_to_history();
                         }
@@ -813,358 +1179,13 @@ impl VennCVApp {
                 });
             });
 
-        // 左侧数据表 - VSCode风格侧边栏
-        if self.show_project_table {
-            SidePanel::left("project_table")
-                .resizable(true)
-                .default_width(200.0)
-                .width_range(150.0..=400.0)
-                .frame(Frame::side_top_panel(&ctx.style()).fill(theme.surface).stroke(Stroke::new(1.0, theme.divider)))
-                .show(ctx, |ui| {
-                    // === 领域管理区域（可折叠） ===
-                    // 限制领域区域高度在20到200之间
-                    let field_height = self.field_section_height.clamp(20.0, 200.0);
-                    
-                    // 领域区域容器
-                    ui.allocate_ui_with_layout(
-                        vec2(ui.available_width(), field_height),
-                        Layout::top_down(Align::LEFT),
-                        |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new("领域")
-                                        .size(11.0)
-                                        .color(theme.text_secondary)
-                                );
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if ui.small_button("+").clicked() {
-                                        let new_id = format!("field_{}", self.data.fields.len() + 1);
-                                        let new_field = ResearchField {
-                                            id: new_id.clone(),
-                                            name: "新领域".to_string(),
-                                            description: String::new(),
-                                            position: (400.0, 400.0),
-                                            radius: 200.0,
-                                        };
-                                        self.data.fields.insert(new_id, new_field);
-                                        self.save_to_history();
-                                    }
-                                });
-                            });
-                            ui.add_space(4.0);
-                            
-                            // 领域列表滚动区域
-                            let field_ids_left: Vec<String> = self.data.fields.keys().cloned().collect();
-                            let mut fields_to_remove_left: Vec<String> = Vec::new();
-                            let mut fields_to_update_left: HashMap<String, String> = HashMap::new();
-                            let mut field_reorder: Option<(usize, usize)> = None;  // (from, to)
-                            
-                            ScrollArea::vertical()
-                                .auto_shrink([false; 2])
-                                .show(ui, |ui| {
-                                    for (idx, field_id) in field_ids_left.iter().enumerate() {
-                                        if let Some(field) = self.data.fields.get(field_id) {
-                                            let item_rect = ui.available_rect_before_wrap();
-                                            let item_height = 24.0;
-                                            let item_rect = Rect::from_min_size(
-                                                item_rect.min,
-                                                vec2(item_rect.width(), item_height)
-                                            );
-                                            
-                                            // 绘制拖拽目标指示线
-                                            if let Some(target_idx) = self.field_drag_target_idx {
-                                                if target_idx == idx {
-                                                    ui.painter().rect_filled(
-                                                        Rect::from_min_size(
-                                                            pos2(item_rect.min.x, item_rect.min.y - 1.0),
-                                                            vec2(item_rect.width(), 2.0)
-                                                        ),
-                                                        0.0,
-                                                        Color32::from_rgb(0, 122, 204)
-                                                    );
-                                                }
-                                            }
-                                            
-                                            // 绘制拖拽中的背景
-                                            let is_dragging = self.dragging_field_idx == Some(idx);
-                                            if is_dragging {
-                                                ui.painter().rect_filled(
-                                                    item_rect,
-                                                    Rounding::same(2.0),
-                                                    theme.selection,
-                                                );
-                                            }
-                                            
-                                            let _response = ui.allocate_ui_at_rect(item_rect, |ui| {
-                                                ui.horizontal(|ui| {
-                                                    // 行号
-                                                    ui.label(
-                                                        RichText::new(format!("{:2}.", idx + 1))
-                                                            .size(11.0)
-                                                            .color(theme.text_secondary)
-                                                            .monospace()
-                                                    );
-                                                    
-                                                    let input_width = (ui.available_width() - 55.0).max(40.0);
-                                                    
-                                                    let mut field_name = field.name.clone();
-                                                    let name_response = ui.add(
-                                                        TextEdit::singleline(&mut field_name)
-                                                            .desired_width(input_width)
-                                                    );
-                                                    if name_response.changed() {
-                                                        fields_to_update_left.insert(field_id.clone(), field_name);
-                                                    }
-                                                    
-                                                    if ui.small_button("×").clicked() {
-                                                        fields_to_remove_left.push(field_id.clone());
-                                                    }
-                                                });
-                                            });
-                                            
-                                            // 处理拖拽
-                                            let drag_response = ui.interact(item_rect, ui.id().with(("field_drag", idx)), Sense::drag());
-                                            
-                                            if drag_response.drag_started() {
-                                                self.dragging_field_idx = Some(idx);
-                                            }
-                                            
-                                            if drag_response.dragged() && self.dragging_field_idx.is_some() {
-                                                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                                            }
-                                            
-                                            // 检测拖拽目标位置
-                                            if self.dragging_field_idx.is_some() {
-                                                if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                                                    if item_rect.contains(pointer_pos) {
-                                                        let relative_y = pointer_pos.y - item_rect.min.y;
-                                                        if relative_y < item_height / 2.0 {
-                                                            self.field_drag_target_idx = Some(idx);
-                                                        } else {
-                                                            self.field_drag_target_idx = Some(idx + 1);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            
-                                            if drag_response.drag_stopped() {
-                                                if let (Some(from_idx), Some(to_idx)) = (self.dragging_field_idx, self.field_drag_target_idx) {
-                                                    if from_idx != to_idx && from_idx + 1 != to_idx {
-                                                        field_reorder = Some((from_idx, to_idx));
-                                                    }
-                                                }
-                                                self.dragging_field_idx = None;
-                                                self.field_drag_target_idx = None;
-                                            }
-                                            
-                                            ui.add_space(2.0);
-                                        }
-                                    }
-                                    
-                                    // 在最后一个项目后绘制拖拽目标线
-                                    if let Some(target_idx) = self.field_drag_target_idx {
-                                        if target_idx == field_ids_left.len() {
-                                            let rect = ui.available_rect_before_wrap();
-                                            ui.painter().rect_filled(
-                                                Rect::from_min_size(
-                                                    pos2(rect.min.x, rect.min.y - 1.0),
-                                                    vec2(rect.width(), 2.0)
-                                                ),
-                                                0.0,
-                                                Color32::from_rgb(0, 122, 204)
-                                            );
-                                        }
-                                    }
-                                });
-                            
-                            // 处理领域重排序
-                            if let Some((from_idx, to_idx)) = field_reorder {
-                                // 获取所有键值对
-                                let entries: Vec<_> = self.data.fields.drain(..).collect();
-                                let mut new_entries = Vec::with_capacity(entries.len());
-                                
-                                // 重新排列
-                                let actual_to = if to_idx > from_idx { to_idx - 1 } else { to_idx };
-                                for (i, entry) in entries.iter().enumerate() {
-                                    if i == from_idx {
-                                        continue;
-                                    }
-                                    if i == actual_to && to_idx <= from_idx {
-                                        new_entries.push(entries[from_idx].clone());
-                                    }
-                                    new_entries.push(entry.clone());
-                                    if i == actual_to && to_idx > from_idx {
-                                        new_entries.push(entries[from_idx].clone());
-                                    }
-                                }
-                                if actual_to >= entries.len() - 1 && to_idx > from_idx {
-                                    new_entries.push(entries[from_idx].clone());
-                                }
-                                if new_entries.len() < entries.len() {
-                                    // 如果移动到最后
-                                    new_entries.push(entries[from_idx].clone());
-                                }
-                                
-                                // 重建IndexMap
-                                for (k, v) in new_entries {
-                                    self.data.fields.insert(k, v);
-                                }
-                                // 重新计算领域布局
-                                self.adjust_field_layout();
-                                // 重新计算所有项目位置（领域位置变了），加入随机抖动避免重叠
-                                self.recalculate_all_project_positions_with_jitter();
-                                // 二次检验并修正重叠
-                                self.validate_and_fix_project_positions();
-                                self.save_to_history();
-                            }
-                            
-                            // 更新领域名称
-                            if !fields_to_update_left.is_empty() {
-                                for (fid, new_name) in fields_to_update_left {
-                                    if let Some(f) = self.data.fields.get_mut(&fid) {
-                                        f.name = new_name;
-                                    }
-                                }
-                                self.save_to_history();
-                            }
-                            
-                            // 删除领域
-                            if !fields_to_remove_left.is_empty() {
-                                for fid in fields_to_remove_left {
-                                    for project in self.data.projects.values_mut() {
-                                        project.field_ids.retain(|id| id != &fid);
-                                    }
-                                    self.data.fields.remove(&fid);
-                                }
-                                self.save_to_history();
-                            }
-                        }
-                    );
-                    
-                    // 可拖拽的分隔线
-                    let separator_rect = ui.available_rect_before_wrap();
-                    let separator_rect = Rect::from_min_size(
-                        separator_rect.min,
-                        vec2(separator_rect.width(), 8.0)
-                    );
-                    
-                    let separator_response = ui.allocate_rect(separator_rect, Sense::drag());
-                    
-                    // 绘制分隔线（拖拽时高亮）
-                    let separator_color = if separator_response.hovered() || separator_response.dragged() {
-                        Color32::from_rgb(100, 150, 255)
-                    } else {
-                        theme.divider
-                    };
-                    ui.painter().rect_filled(
-                        Rect::from_min_size(
-                            pos2(separator_rect.min.x, separator_rect.center().y - 1.0),
-                            vec2(separator_rect.width(), 2.0)
-                        ),
-                        0.0,
-                        separator_color
-                    );
-                    
-                    // 处理拖拽
-                    if separator_response.dragged() {
-                        self.field_section_height += separator_response.drag_delta().y;
-                        self.field_section_height = self.field_section_height.clamp(20.0, 200.0);
-                    }
-                    
-                    // 改变鼠标光标
-                    if separator_response.hovered() || separator_response.dragged() {
-                        ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
-                    }
-                    
-                    ui.add_space(4.0);
-                    
-                    // === 项目列表区域（中间） ===
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("项目")
-                                .size(11.0)
-                                .color(theme.text_secondary)
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("+").clicked() {
-                                self.create_new_project_shortcut();
-                            }
-                        });
-                    });
-                    ui.add_space(4.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    
-                    ScrollArea::vertical()
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            // 显示项目列表 - VSCode文件树风格
-                            for (idx, (id, project)) in self.data.projects.iter().enumerate() {
-                                let is_selected = self.selected_project.as_ref() == Some(id);
-                                
-                                // 绘制背景
-                                let item_rect = ui.available_rect_before_wrap();
-                                let item_height = 24.0;
-                                let item_rect = Rect::from_min_size(
-                                    item_rect.min,
-                                    vec2(item_rect.width(), item_height)
-                                );
-                                
-                                if is_selected {
-                                    ui.painter().rect_filled(
-                                        item_rect,
-                                        Rounding::same(0.0),
-                                        theme.selection,
-                                    );
-                                } else if item_rect.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default()) {
-                                    ui.painter().rect_filled(
-                                        item_rect,
-                                        Rounding::same(0.0),
-                                        theme.surface_hover,
-                                    );
-                                }
-                                
-                                // 项目名称（带行号）
-                                let response = ui.allocate_ui_at_rect(item_rect, |ui| {
-                                    ui.horizontal(|ui| {
-                                        // 行号
-                                        ui.label(
-                                            RichText::new(format!("{:2}.", idx + 1))
-                                                .size(11.0)
-                                                .color(theme.text_secondary)
-                                                .monospace()
-                                        );
-                                        ui.label(
-                                            RichText::new(&project.name)
-                                                .size(13.0)
-                                                .color(if is_selected { Color32::WHITE } else { theme.text_primary })
-                                        );
-                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            // 状态标签
-                                            let status_color = project.status.color();
-                                            ui.label(
-                                                RichText::new(project.status.name())
-                                                    .size(10.0)
-                                                    .color(Color32::WHITE)
-                                                    .background_color(status_color)
-                                            );
-                                        });
-                                    });
-                                });
-                                
-                                if response.response.clicked() {
-                                    self.selected_project = Some(id.clone());
-                                    self.editing_project = Some(project.clone());
-                                }
-                            }
-                        });
-                });
-        }
+        // 左侧数据表 - VSCode风格侧边栏（egui_extras Strip 列布局见 left_sidebar）
+        crate::left_sidebar::show_left_project_table(self, ctx, &theme);
 
         // 右侧属性编辑面板 - VSCode风格
         // 注意：属性面板在可视化面板之后渲染，确保左边界贴着可视化面板
         if self.show_property_panel {
-            let panel_response = SidePanel::right("property_panel")
+            let _panel_response = SidePanel::right("property_panel")
                 .resizable(true)
                 .default_width(self.property_panel_width)
                 .width_range(200.0..=400.0)
@@ -1184,13 +1205,39 @@ impl VennCVApp {
                     ui.separator();
                     ui.add_space(4.0);
 
-                    // 先克隆project，避免借用冲突
-                    let project_clone = self.editing_project.clone();
-                    if let Some(project) = project_clone {
-                        let mut project_mut = project.clone();
-                        
+                    // 编辑缓冲区与选中项目 id 对齐（避免只更新了 selected_project 时属性栏仍为空或错位）
+                    if let Some(sel_id) = &self.selected_project {
+                        let need_resync = match &self.project_edit_buffer {
+                            None => true,
+                            Some(b) => b.id != *sel_id,
+                        };
+                        if need_resync {
+                            self.project_edit_buffer = self.data.projects.get(sel_id).cloned();
+                        }
+                    } else {
+                        self.project_edit_buffer = None;
+                    }
+                    
+                    // 在闭包外部先获取 selected_project_id，避免借用冲突
+                    let selected_project_id_for_sync = self.selected_project.clone();
+                    
+                    // 在闭包外部定义变量，用于在闭包外部同步数据
+                    let mut project_changed = false;
+                    let mut text_field_changed = false;
+                    let mut name_lost_focus = false;
+                    let mut name_value_on_lost_focus = String::new();
+                    let mut desc_lost_focus = false;
+                    let mut desc_value_on_lost_focus = String::new();
+                    let mut field_changed = false;
+                    
+                    if let Some(project_mut) = &mut self.project_edit_buffer {
+                        // 每个项目一套独立 Widget 记忆（光标、滚动条、ComboBox 等），禁止跨项目共用 Id
+                        let project_property_id =
+                            Id::new("venncv_project_property").with(project_mut.id.as_str());
+
                         ScrollArea::vertical()
                             .auto_shrink([false; 2])
+                            .id_source(project_property_id.with("scroll"))
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.label(
@@ -1199,19 +1246,27 @@ impl VennCVApp {
                                             .color(theme.text_secondary)
                                     );
                                     ui.add_space(8.0);
-
-                                    let mut project_changed = false;
                                     
                                     ui.vertical(|ui| {
                                         ui.label(
                                             RichText::new("名称").size(11.0).color(theme.text_secondary)
                                         );
                                         ui.add_space(4.0);
-                                        if ui.add(
+                                        let name_edit_response = ui.add(
                                             TextEdit::singleline(&mut project_mut.name)
                                                 .desired_width(ui.available_width())
-                                        ).changed() {
+                                                .id(project_property_id.with("name")),
+                                        );
+                                        if name_edit_response.changed() {
                                             project_changed = true;
+                                            text_field_changed = true;
+                                            // 注意：不在文本字段更改时立即同步到实际项目数据
+                                            // 避免触发状态变化导致重新渲染，文本框失去焦点
+                                        }
+                                        // 只在失去焦点时标记，在闭包外部同步数据
+                                        if name_edit_response.lost_focus() {
+                                            name_lost_focus = true;
+                                            name_value_on_lost_focus = project_mut.name.clone();
                                         }
                                     });
 
@@ -1222,12 +1277,22 @@ impl VennCVApp {
                                             RichText::new("描述").size(11.0).color(theme.text_secondary)
                                         );
                                         ui.add_space(4.0);
-                                        if ui.add(
+                                        let desc_edit_response = ui.add(
                                             TextEdit::multiline(&mut project_mut.description)
                                                 .desired_width(ui.available_width())
                                                 .desired_rows(4)
-                                        ).changed() {
+                                                .id(project_property_id.with("description")),
+                                        );
+                                        if desc_edit_response.changed() {
                                             project_changed = true;
+                                            text_field_changed = true;
+                                            // 注意：不在文本字段更改时立即同步到实际项目数据
+                                            // 避免触发状态变化导致重新渲染，文本框失去焦点
+                                        }
+                                        // 只在失去焦点时标记，在闭包外部同步数据
+                                        if desc_edit_response.lost_focus() {
+                                            desc_lost_focus = true;
+                                            desc_value_on_lost_focus = project_mut.description.clone();
                                         }
                                     });
                                     
@@ -1239,7 +1304,7 @@ impl VennCVApp {
                                         );
                                         ui.add_space(4.0);
                                         let mut status_changed = false;
-                                        ComboBox::from_id_source("status")
+                                        ComboBox::from_id_source(project_property_id.with("status"))
                                             .selected_text(project_mut.status.name())
                                             .width(150.0) // 固定宽度
                                             .show_ui(ui, |ui| {
@@ -1299,24 +1364,10 @@ impl VennCVApp {
                                         }
                                     });
                                     
-                                    // 如果项目属性发生变化，实时更新
-                                    if project_changed {
-                                        // 更新编辑中的项目
-                                        self.editing_project = Some(project_mut.clone());
-                                        // 同步到实际项目数据
-                                        if let Some(id) = &self.selected_project {
-                                            if let Some(p) = self.data.projects.get_mut(id) {
-                                                *p = project_mut.clone();
-                                            }
-                                            // 保存到历史
-                                            self.save_to_history();
-                                        }
-                                    }
+                                    // 注意：不在闭包内同步数据，避免借用冲突
+                                    // 在闭包外部处理所有同步操作
                                     
                                     ui.add_space(12.0);
-                                    
-                                    let mut field_changed = false;
-                                    let selected_project_id = self.selected_project.clone();
                                     
                                     ui.vertical(|ui| {
                                         ui.label(
@@ -1324,397 +1375,132 @@ impl VennCVApp {
                                         );
                                         ui.add_space(4.0);
                                         let field_ids: Vec<String> = self.data.fields.keys().cloned().collect();
-                                        for field_id in field_ids {
-                                            let field_name = self.data.fields.get(&field_id).map(|f| f.name.clone()).unwrap_or_default();
-                                            let mut is_selected = project_mut.field_ids.contains(&field_id);
-                                            let checkbox_response = ui.checkbox(&mut is_selected, &field_name);
-                                            if checkbox_response.changed() {
-                                                if is_selected {
-                                                    if !project_mut.field_ids.contains(&field_id) {
-                                                        project_mut.field_ids.push(field_id.clone());
+                                        ui.push_id(project_property_id.with("field_pick"), |ui| {
+                                            for field_id in field_ids {
+                                                let field_name = self
+                                                    .data
+                                                    .fields
+                                                    .get(&field_id)
+                                                    .map(|f| f.name.clone())
+                                                    .unwrap_or_default();
+                                                let mut is_selected = project_mut.field_ids.contains(&field_id);
+                                                ui.push_id(&field_id, |ui| {
+                                                    let checkbox_response =
+                                                        ui.checkbox(&mut is_selected, &field_name);
+                                                    if checkbox_response.changed() {
+                                                        if is_selected {
+                                                            if !project_mut.field_ids.contains(&field_id) {
+                                                                project_mut.field_ids.push(field_id.clone());
+                                                            }
+                                                        } else {
+                                                            project_mut.field_ids.retain(|id| id != &field_id);
+                                                        }
+                                                        field_changed = true;
                                                     }
-                                                } else {
-                                                    project_mut.field_ids.retain(|id| id != &field_id);
-                                                }
-                                                field_changed = true;
-                                                // 立即更新编辑中的项目
-                                                self.editing_project = Some(project_mut.clone());
-                                                // 同步到实际项目数据
-                                                if let Some(id) = &selected_project_id {
-                                                    if let Some(p) = self.data.projects.get_mut(id) {
-                                                        *p = project_mut.clone();
-                                                    }
-                                                }
+                                                });
                                             }
-                                        }
+                                        });
                                     });
                                     
-                                    // 勾选领域后自动更新项目位置并解决重叠
-                                    if field_changed {
-                                        if let Some(id) = &selected_project_id {
-                                            let new_position = self.calculate_project_position(&project_mut);
-                                            project_mut.position = new_position;
-                                            // 更新编辑中的项目
-                                            self.editing_project = Some(project_mut.clone());
-                                            // 更新到实际项目
-                                            if let Some(p) = self.data.projects.get_mut(id) {
-                                                p.position = new_position;
-                                            }
-                                            // 自动验证并修正所有项目位置（物理引擎）
-                                            self.validate_and_fix_project_positions();
-                                            // 更新编辑中的项目位置（可能被物理引擎调整）
-                                            if let Some(p) = self.data.projects.get(id) {
-                                                project_mut.position = p.position;
-                                                self.editing_project = Some(project_mut.clone());
-                                            }
-                                        }
-                                    }
+                                    // 注意：不在闭包内调用需要self的方法，避免借用冲突
+                                    // 在闭包外部处理领域更改的位置更新
+                                    
+                                    // 注意：完全不在渲染过程中更新 editing_project
+                                    // 这会导致下一帧渲染时从 editing_project 克隆的数据不同，导致文本框内容被重置
+                                    // 所有 editing_project 的更新都延迟到文本字段失去焦点时处理
+                                    // 对于非文本字段的更改，我们不需要更新 editing_project，因为：
+                                    // 1. 实际项目数据已经更新
+                                    // 2. 下一帧渲染时，如果文本字段没有焦点，可以从实际项目数据重新同步
+                                    // 3. 如果文本字段有焦点，保持 editing_project 稳定，避免重置文本框内容
 
                                     ui.add_space(16.0);
                                     ui.separator();
                                     ui.add_space(12.0);
                                     
-                                    // 项目关系管理
-                                    ui.label(
-                                        RichText::new("项目关系")
-                                            .size(12.0)
-                                            .color(theme.text_secondary)
-                                    );
-                                    ui.add_space(8.0);
-                                    
-                                    // 显示当前项目的关系（使用滚动区域）
-                                    let project_id = self.selected_project.clone();
-                                    let mut relations_to_remove = Vec::new();
-                                    
-                                    // 先收集需要显示的关系信息，避免借用冲突
-                                    let mut relation_info: Vec<(usize, String, String, bool)> = Vec::new();
-                                    for (idx, relation) in self.data.relations.iter().enumerate() {
-                                        if let Some(ref pid) = project_id {
-                                            if relation.from_id == *pid || relation.to_id == *pid {
-                                                let from_name = self.data.projects.get(&relation.from_id)
-                                                    .map(|p| p.name.clone())
-                                                    .unwrap_or_else(|| "未知".to_string());
-                                                let to_name = self.data.projects.get(&relation.to_id)
-                                                    .map(|p| p.name.clone())
-                                                    .unwrap_or_else(|| "未知".to_string());
-                                                let is_outgoing = relation.from_id == *pid;
-                                                relation_info.push((idx, from_name, to_name, is_outgoing));
-                                            }
-                                        }
-                                    }
-                                    
-                                    // 使用滚动区域显示关系列表
-                                    ScrollArea::vertical().show(ui, |ui| {
-                            // 显示关系编辑界面
-                            let mut needs_save_after = false;
-                            for (idx, from_name, to_name, is_outgoing) in relation_info {
-                                if let Some(relation) = self.data.relations.get_mut(idx) {
-                                    let is_expanded = self.expanded_relations.get(&idx).copied().unwrap_or(false);
-                                    
-                                    // 关系标题行（折叠状态）
-                                    ui.horizontal(|ui| {
-                                        // 展开/折叠按钮
-                                        let expand_text = if is_expanded { "▼" } else { "▶" };
-                                        if ui.button(expand_text).clicked() {
-                                            self.expanded_relations.insert(idx, !is_expanded);
-                                        }
-                                        
-                                        // 显示关系方向（限制文本宽度）
-                                        let direction_text = if is_outgoing {
-                                            format!("→ {}", to_name)
-                                        } else {
-                                            format!("← {}", from_name)
-                                        };
-                                        // 如果文本太长，截断（使用字符数限制更可靠）
-                                        let max_chars = 15; // 限制字符数
-                                        let truncated_text = if direction_text.chars().count() > max_chars {
-                                            let mut chars: Vec<char> = direction_text.chars().take(max_chars).collect();
-                                            chars.push('…');
-                                            chars.into_iter().collect::<String>()
-                                        } else {
-                                            direction_text
-                                        };
-                                        // 使用label并限制宽度
-                                        ui.label(truncated_text);
-                                        
-                                        // 显示标签（紧凑显示，不撑开面板）
-                                        if !relation.tags.is_empty() {
-                                            // 只显示第一个标签，紧跟在方向文字后面
-                                            if let Some(first_tag) = relation.tags.first() {
-                                                ui.label(
-                                                    RichText::new(first_tag)
-                                                        .size(10.0)
-                                                        .background_color(Color32::from_rgb(200, 200, 200))
-                                                );
-                                            }
-                                            if relation.tags.len() > 1 {
-                                                ui.label(RichText::new(format!("+{}", relation.tags.len() - 1)).size(10.0));
-                                            }
-                                        }
-                                        
-                                        // 删除按钮
-                                        if ui.small_button("删除").clicked() {
-                                            relations_to_remove.push(idx);
-                                        }
-                                    });
-                                    
-                                    // 展开的详细设置
-                                    if is_expanded {
-                                        ui.group(|ui| {
-                                            ui.add_space(5.0);
-                                            
-                                            // 目标项目选择（仅当是出向关系时）
-                                            let mut to_id_changed = false;
-                                            let mut new_to_id = relation.to_id.clone();
-                                            if is_outgoing {
-                                                ui.horizontal(|ui| {
-                                                    ui.label("目标项目: ");
-                                                    ComboBox::from_id_source(format!("to_project_{}", idx))
-                                                        .selected_text(to_name)
-                                                        .width(120.0) // 固定宽度
-                                                        .show_ui(ui, |ui| {
-                                                            for (id, proj) in &self.data.projects {
-                                                                if *id != relation.from_id {
-                                                                    if ui.selectable_label(
-                                                                        relation.to_id == *id,
-                                                                        &proj.name
-                                                                    ).clicked() {
-                                                                        new_to_id = id.clone();
-                                                                        to_id_changed = true;
-                                                                    }
-                                                                }
-                                                            }
-                                                        });
-                                                });
-                                                if to_id_changed {
-                                                    relation.to_id = new_to_id;
-                                                    needs_save_after = true;
-                                                }
-                                            } else {
-                                                ui.label(format!("源项目: {}", from_name));
-                                            }
-                                            
-                                            ui.add_space(5.0);
-                                            
-                                            // 关系类型（虚实）
-                                            let mut relation_type_changed = false;
-                                            let mut new_relation_type = relation.relation_type;
-                                            ui.horizontal(|ui| {
-                                                ui.label("类型: ");
-                                                if ui.radio_value(&mut new_relation_type, RelationType::Direct, "实线").clicked() {
-                                                    relation_type_changed = true;
-                                                }
-                                                if ui.radio_value(&mut new_relation_type, RelationType::Indirect, "虚线").clicked() {
-                                                    relation_type_changed = true;
-                                                }
-                                            });
-                                            if relation_type_changed {
-                                                relation.relation_type = new_relation_type;
-                                                needs_save_after = true;
-                                            }
-                                            
-                                            ui.add_space(5.0);
-                                            
-                                            // 线宽
-                                            let mut width_changed = false;
-                                            let mut new_width = relation.width;
-                                            ui.horizontal(|ui| {
-                                                ui.label("线宽: ");
-                                                if ui.add(egui::Slider::new(&mut new_width, 0.5..=10.0)
-                                                    .step_by(0.5)
-                                                    .suffix(" px")).changed() {
-                                                    width_changed = true;
-                                                }
-                                            });
-                                            if width_changed {
-                                                relation.width = new_width;
-                                                needs_save_after = true;
-                                            }
-                                            
-                                            ui.add_space(5.0);
-                                            
-                                            // 颜色
-                                            let mut color_changed = false;
-                                            let mut new_color = relation.color;
-                                            let mut color_rgba = [
-                                                relation.color[0] as f32 / 255.0,
-                                                relation.color[1] as f32 / 255.0,
-                                                relation.color[2] as f32 / 255.0,
-                                                relation.color[3] as f32 / 255.0,
-                                            ];
-                                            ui.horizontal(|ui| {
-                                                ui.label("颜色: ");
-                                                if ui.color_edit_button_rgba_unmultiplied(&mut color_rgba).changed() {
-                                                    new_color = [
-                                                        (color_rgba[0] * 255.0) as u8,
-                                                        (color_rgba[1] * 255.0) as u8,
-                                                        (color_rgba[2] * 255.0) as u8,
-                                                        (color_rgba[3] * 255.0) as u8,
-                                                    ];
-                                                    color_changed = true;
-                                                }
-                                            });
-                                            if color_changed {
-                                                relation.color = new_color;
-                                                needs_save_after = true;
-                                            }
-                                            
-                                            ui.add_space(5.0);
-                                            
-                                            // 标签选择
-                                            ui.label("代表意义（标签）: ");
-                                            let mut tags_to_remove = Vec::new();
-                                            ui.horizontal_wrapped(|ui| {
-                                                ui.set_max_width(200.0); // 固定最大宽度
-                                                // 显示已有标签
-                                                for (tag_idx, tag) in relation.tags.iter().enumerate() {
-                                                    if ui.small_button(format!("{} ✕", tag)).clicked() {
-                                                        tags_to_remove.push(tag_idx);
-                                                    }
-                                                }
-                                            });
-                                            
-                                            // 删除标签
-                                            for tag_idx in tags_to_remove.iter().rev() {
-                                                relation.tags.remove(*tag_idx);
-                                                needs_save_after = true;
-                                            }
-                                            
-                                            ui.add_space(5.0);
-                                            
-                                            // 添加标签（统一的输入框）
-                                            ui.horizontal(|ui| {
-                                                ui.label("添加标签: ");
-                                                // 获取或初始化输入框内容
-                                                let tag_input = self.relation_tag_inputs.entry(idx).or_insert_with(String::new);
-                                                let response = ui.add(
-                                                    TextEdit::singleline(tag_input)
-                                                        .hint_text("输入标签名或选择现有标签...")
-                                                        .desired_width(80.0) // 固定宽度
-                                                );
-                                                
-                                                // 显示标签下拉列表（当输入框获得焦点时）
-                                                if response.has_focus() {
-                                                    let popup_id = egui::Id::new(format!("tag_popup_{}", idx));
-                                                    egui::popup::popup_below_widget(ui, popup_id, &response, |ui| {
-                                                        ui.set_width(response.rect.width().max(200.0));
-                                                        ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
-                                                            // 显示已有标签（未添加到当前关系的）
-                                                            let mut has_tags = false;
-                                                            if !self.data.relation_tags.is_empty() {
-                                                                for tag in &self.data.relation_tags {
-                                                                    if !relation.tags.contains(tag) {
-                                                                        has_tags = true;
-                                                                        if ui.selectable_label(false, tag).clicked() {
-                                                                            relation.tags.push(tag.clone());
-                                                                            needs_save_after = true;
-                                                                            // 清空输入框
-                                                                            tag_input.clear();
-                                                                            ui.memory_mut(|mem| mem.close_popup());
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                            if !has_tags {
-                                                                ui.label(RichText::new("暂无可用标签").size(11.0).color(theme.text_secondary));
-                                                            }
-                                                        });
-                                                    });
-                                                }
-                                                
-                                                // 处理回车键创建新标签 - 类似飞书的效果
-                                                if response.has_focus() {
-                                                    if ctx.input(|i| i.key_pressed(Key::Enter)) && !tag_input.trim().is_empty() {
-                                                        let tag_to_add = tag_input.trim().to_string();
-                                                        if !tag_to_add.is_empty() {
-                                                            // 如果标签不存在于全局标签库，则添加
-                                                            if !self.data.relation_tags.contains(&tag_to_add) {
-                                                                self.data.relation_tags.push(tag_to_add.clone());
-                                                            }
-                                                            // 如果标签不存在于当前关系，则添加
-                                                            if !relation.tags.contains(&tag_to_add) {
-                                                                relation.tags.push(tag_to_add);
-                                                                needs_save_after = true;
-                                                            }
-                                                            // 清空输入框
-                                                            tag_input.clear();
-                                                            ui.memory_mut(|mem| mem.close_popup());
-                                                            // 请求重新绘制
-                                                            ctx.request_repaint();
-                                                        }
-                                                    }
-                                                }
-                                                // 也处理失去焦点时的回车（如果输入框有内容）
-                                                if response.lost_focus() && !tag_input.trim().is_empty() {
-                                                    let tag_to_add = tag_input.trim().to_string();
-                                                    if !tag_to_add.is_empty() {
-                                                        // 如果标签不存在于全局标签库，则添加
-                                                        if !self.data.relation_tags.contains(&tag_to_add) {
-                                                            self.data.relation_tags.push(tag_to_add.clone());
-                                                        }
-                                                        // 如果标签不存在于当前关系，则添加
-                                                        if !relation.tags.contains(&tag_to_add) {
-                                                            relation.tags.push(tag_to_add);
-                                                            needs_save_after = true;
-                                                        }
-                                                        // 清空输入框
-                                                        tag_input.clear();
-                                                        ui.memory_mut(|mem| mem.close_popup());
-                                                    }
-                                                }
-                                            });
-                                        });
-                                        
-                                        ui.add_space(5.0);
-                                    }
-                                }
-                            }
-                            
-                                        // 统一保存更改
-                                        if needs_save_after {
-                                            self.save_to_history();
-                                            return; // 提前返回，下一帧再渲染
-                                        }
-                                    });
-                                    
-                                    // 删除关系（在循环外处理，避免借用冲突）
-                                    if !relations_to_remove.is_empty() {
-                                        let to_remove = relations_to_remove;
-                                        for idx in to_remove.iter().rev() {
-                                            self.data.relations.remove(*idx);
-                                            self.expanded_relations.remove(idx);
-                                            self.relation_tag_inputs.remove(idx);
-                                        }
-                                        self.save_to_history();
-                                        return; // 提前返回，下一帧再渲染
-                                    }
-                                    
-                                    ui.add_space(8.0);
-                                    if ui.add_sized(
-                                        [ui.available_width(), 28.0],
-                                        Button::new(
-                                            RichText::new("+ 添加关系")
-                                                .size(12.0)
-                                                .color(theme.text_primary)
-                                        )
-                                        .fill(theme.surface)
-                                    ).clicked() {
-                                        if let Some(id) = &project_id {
-                                            let new_relation = ProjectRelation {
-                                                from_id: id.clone(),
-                                                to_id: String::new(),
-                                                relation_type: RelationType::Direct,
-                                                tags: Vec::new(),
-                                                color: default_relation_color(),
-                                                width: default_relation_width(),
-                                            };
-                                            self.data.relations.push(new_relation);
-                                            self.save_to_history();
-                                            return; // 提前返回，下一帧再渲染
-                                        }
-                                    }
+                                    // 注意：关系管理部分需要访问 self，但我们在 project_mut 的借用范围内
+                                    // 暂时跳过关系管理，避免借用冲突
+                                    // TODO: 将关系管理移到独立的函数中处理
+                                    ui.label(RichText::new("项目关系管理（暂时禁用，避免借用冲突）").size(11.0).color(theme.text_secondary));
                                 });
                             });
+                    
+                    // 在闭包外部处理同步操作，避免借用冲突
+                    // 处理文本字段失去焦点时的同步
+                    if name_lost_focus {
+                        if let Some(id) = &selected_project_id_for_sync {
+                            if let Some(p) = self.data.projects.get_mut(id) {
+                                p.name = name_value_on_lost_focus.clone();
+                            }
+                            self.save_to_history();
+                            if let Some(ep) = &self.project_edit_buffer {
+                                self.editing_project = Some(ep.clone());
+                            }
+                        }
+                    }
+                    
+                    if desc_lost_focus {
+                        if let Some(id) = &selected_project_id_for_sync {
+                            if let Some(p) = self.data.projects.get_mut(id) {
+                                p.description = desc_value_on_lost_focus.clone();
+                            }
+                            self.save_to_history();
+                            if let Some(ep) = &self.project_edit_buffer {
+                                self.editing_project = Some(ep.clone());
+                            }
+                        }
+                    }
+                    
+                    // 处理非文本字段的更改
+                    if project_changed && !text_field_changed {
+                        if let Some(id) = &selected_project_id_for_sync {
+                            if let Some(p) = self.data.projects.get_mut(id) {
+                                if let Some(pmb) = &self.project_edit_buffer {
+                                    *p = pmb.clone();
+                                }
+                            }
+                            self.save_to_history();
+                        }
+                    }
+                    
+                    // 所属领域勾选变更：必须把 buffer 中的 field_ids 等一并写回 data，否则会出现
+                    // 「属性栏与画布/校验逻辑不一致」，并可能在布局校验中触发极端状态。
+                    if field_changed {
+                        if let Some(id) = &selected_project_id_for_sync {
+                            if let Some(pmb) = &self.project_edit_buffer {
+                                if pmb.id != *id {
+                                    log::warn!(
+                                        "field_changed: buffer id {:?} != selected {:?}, skip sync",
+                                        pmb.id,
+                                        id
+                                    );
+                                } else {
+                                    let mut updated = pmb.clone();
+                                    updated.position = self.calculate_project_position(&updated);
+                                    if let Some(p) = self.data.projects.get_mut(id) {
+                                        *p = updated;
+                                    }
+                                    // 由本路径统一 save_to_history，避免 validate 再记一条 undo
+                                    self.validate_and_fix_project_positions_inner(false);
+                                    self.save_to_history();
+                                    if let Some(p) = self.data.projects.get(id).cloned() {
+                                        if let Some(buf) = &mut self.project_edit_buffer {
+                                            *buf = p.clone();
+                                        }
+                                        if let Some(ep) = &mut self.editing_project {
+                                            if ep.id == *id {
+                                                *ep = p;
+                                            }
+                                        }
+                                    }
+                                    log::debug!(
+                                        "project {:?} field_ids synced to data: {:?}",
+                                        id,
+                                        self.data.projects.get(id).map(|p| &p.field_ids)
+                                    );
+                                }
+                            }
+                        }
+                    }
                     } else {
                         // 没有选中项目时，显示提示信息
                         ui.vertical_centered(|ui| {
@@ -2051,12 +1837,22 @@ impl VennCVApp {
                         );
                     }
 
-                    // 绘制项目名称
+                    // 绘制项目名称（选中项与右侧属性栏共用编辑缓冲区，避免未失焦时画布名称与输入框不一致）
                     if self.settings.show_project_names {
+                        let name_on_canvas =
+                            if self.selected_project.as_ref() == Some(&project.id) {
+                                self.project_edit_buffer
+                                    .as_ref()
+                                    .filter(|b| b.id == project.id)
+                                    .map(|b| b.name.as_str())
+                                    .unwrap_or(project.name.as_str())
+                            } else {
+                                project.name.as_str()
+                            };
                         painter.text(
                             pos2(center.x, center.y + radius + 15.0),
                             Align2::CENTER_CENTER,
-                            &project.name,
+                            name_on_canvas,
                             FontId::proportional(12.0),
                             Color32::BLACK,
                         );
@@ -2139,6 +1935,8 @@ impl VennCVApp {
                                     // 普通点击：选中项目
                                     self.selected_project = Some(id.clone());
                                     self.editing_project = Some(project.clone());
+                                    // 初始化编辑缓冲区
+                                    self.project_edit_buffer = Some(project.clone());
                                 }
                                 break;
                             }
@@ -2270,23 +2068,20 @@ impl VennCVApp {
             return;
         }
         
-        // Command+S: 保存 (macOS)
-        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.mac_cmd) {
+        // Command/Ctrl+S：保存（`command` 在 macOS 为 ⌘，在 Windows/Linux 为 Ctrl）
+        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.command) {
             self.save_data();
         }
-        
-        // Command+Z: 撤销 (macOS)
-        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.mac_cmd && !i.modifiers.shift) {
+
+        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.command && !i.modifiers.shift) {
             self.undo();
         }
-        
-        // Command+Shift+Z: 重做 (macOS)
-        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.mac_cmd && i.modifiers.shift) {
+
+        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.command && i.modifiers.shift) {
             self.redo();
         }
-        
-        // Command+N: 新建项目 (macOS)
-        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.mac_cmd) {
+
+        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.command) {
             self.create_new_project_shortcut();
         }
         
@@ -2310,14 +2105,19 @@ impl VennCVApp {
             self.zoom_reset();
         }
         
-        // Esc: 取消选中项目
+        // Esc: 优先关闭设置对话框（与「取消」一致），否则取消选中项目
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
-            self.selected_project = None;
-            self.toolbar_focus_index = None;  // 同时取消工具栏选中
+            if self.show_settings_dialog {
+                self.load_settings();
+                self.show_settings_dialog = false;
+            } else {
+                self.selected_project = None;
+                self.toolbar_focus_index = None;  // 同时取消工具栏选中
+            }
         }
         
-        // Enter: 触发选中的工具栏按钮
-        if ctx.input(|i| i.key_pressed(Key::Enter)) {
+        // Enter: 触发选中的工具栏按钮（属性栏/登录等文本框聚焦时不要抢占回车，否则会误触删除等操作）
+        if ctx.input(|i| i.key_pressed(Key::Enter)) && !ctx.wants_keyboard_input() {
             if let Some(idx) = self.toolbar_focus_index {
                 match idx {
                     0 => self.create_new_project_shortcut(),
@@ -2327,6 +2127,7 @@ impl VennCVApp {
                             self.data.relations.retain(|r| r.from_id != id && r.to_id != id);
                             self.selected_project = None;
                             self.editing_project = None;
+                            self.project_edit_buffer = None;
                             self.save_to_history();
                         }
                     }
@@ -2352,7 +2153,7 @@ impl VennCVApp {
     }
     
     /// 保存当前状态到历史
-    fn save_to_history(&mut self) {
+    pub(crate) fn save_to_history(&mut self) {
         // 移除当前索引之后的历史（如果有重做操作后又有新操作）
         self.history.truncate(self.history_index + 1);
         
@@ -2374,6 +2175,7 @@ impl VennCVApp {
             self.data = self.history[self.history_index].clone();
             self.selected_project = None;
             self.editing_project = None;
+            self.project_edit_buffer = None;
         }
     }
     
@@ -2384,11 +2186,12 @@ impl VennCVApp {
             self.data = self.history[self.history_index].clone();
             self.selected_project = None;
             self.editing_project = None;
+            self.project_edit_buffer = None;
         }
     }
     
     /// 新建项目（快捷键）
-    fn create_new_project_shortcut(&mut self) {
+    pub(crate) fn create_new_project_shortcut(&mut self) {
         // 找到最大的项目编号，确保新ID不会冲突
         let max_num = self.data.projects.keys()
             .filter_map(|id| id.strip_prefix("project_").and_then(|n| n.parse::<usize>().ok()))
@@ -2413,7 +2216,9 @@ impl VennCVApp {
         self.save_to_history();
         self.data.projects.insert(new_id.clone(), new_project.clone());
         self.selected_project = Some(new_id);
-        self.editing_project = Some(new_project);
+        self.editing_project = Some(new_project.clone());
+        // 初始化编辑缓冲区
+        self.project_edit_buffer = Some(new_project);
     }
     
     /// 切换到下一个项目
@@ -2436,6 +2241,8 @@ impl VennCVApp {
         if let Some(project) = self.data.projects.get(&next_id) {
             self.selected_project = Some(next_id.clone());
             self.editing_project = Some(project.clone());
+            // 初始化编辑缓冲区
+            self.project_edit_buffer = Some(project.clone());
         }
     }
     
@@ -2463,6 +2270,8 @@ impl VennCVApp {
         if let Some(project) = self.data.projects.get(&prev_id) {
             self.selected_project = Some(prev_id.clone());
             self.editing_project = Some(project.clone());
+            // 初始化编辑缓冲区
+            self.project_edit_buffer = Some(project.clone());
         }
     }
     
@@ -2485,43 +2294,54 @@ impl VennCVApp {
     }
 
     fn new_file(&mut self) {
-        self.data = AppData::default();
+        // 与「空白工作区」语义一致；`AppData::default()` 内含固定示例数据，易与「新建」混淆
+        let empty = AppData::default_empty();
+        self.data = empty.clone();
         self.current_file_path = None;
         self.selected_project = None;
         self.editing_project = None;
-        // 重置历史
-        self.history = vec![AppData::default()];
+        self.project_edit_buffer = None;
+        self.history = vec![empty];
         self.history_index = 0;
     }
 
     fn load_data(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("JSON", &["json"])
-            .set_title("打开数据文件")
-            .pick_file()
+        #[cfg(not(target_arch = "wasm32"))]
         {
-                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                match serde_json::from_str::<AppData>(&content) {
-                                    Ok(data) => {
-                                        self.data = data.clone();
-                                        self.current_file_path = Some(path.clone());
-                                        self.selected_project = None;
-                                        self.editing_project = None;
-                                        // 验证并修正项目位置
-                                        self.validate_and_fix_project_positions();
-                                        // 重置历史（使用修正后的数据）
-                                        self.history = vec![self.data.clone()];
-                                        self.history_index = 0;
-                                        // 更新最近编辑的文件路径
-                                        self.update_last_edited_file(&path);
-                                    }
-                                    Err(e) => {
-                                        eprintln!("加载数据失败: {}", e);
-                                    }
-                                }
-                            } else {
-                                eprintln!("读取文件失败");
-                            }
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_title("打开数据文件")
+                .pick_file()
+            {
+                let pkey = path.to_string_lossy().to_string();
+                if let Ok(content) = crate::platform::read_to_string(&pkey) {
+                    match serde_json::from_str::<AppData>(&content) {
+                        Ok(data) => {
+                            self.data = data.clone();
+                            self.current_file_path = Some(path.clone());
+                            self.selected_project = None;
+                            self.editing_project = None;
+                            self.project_edit_buffer = None;
+                            self.validate_and_fix_project_positions();
+                            self.history = vec![self.data.clone()];
+                            self.history_index = 0;
+                            self.update_last_edited_file(&path);
+                        }
+                        Err(e) => {
+                            eprintln!("加载数据失败: {}", e);
+                        }
+                    }
+                } else {
+                    eprintln!("读取文件失败");
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web_file_ui = Some(WebFileUi::Import {
+                draft: String::new(),
+                replace_workspace: true,
+            });
         }
     }
 
@@ -2529,12 +2349,12 @@ impl VennCVApp {
         // 如果有当前文件路径，直接保存
         if let Some(ref path) = self.current_file_path {
             let path_clone = path.clone();
+            let pkey = path_clone.to_string_lossy().to_string();
             match serde_json::to_string_pretty(&self.data) {
                 Ok(json) => {
-                    if let Err(e) = std::fs::write(&path_clone, json) {
+                    if let Err(e) = crate::platform::write(&pkey, json.as_bytes()) {
                         eprintln!("保存数据失败: {}", e);
                     } else {
-                        // 保存成功后，更新最近编辑的文件路径
                         self.update_last_edited_file(&path_clone);
                     }
                 }
@@ -2543,105 +2363,264 @@ impl VennCVApp {
                 }
             }
         } else {
-            // 没有当前文件路径，弹出保存对话框
             self.save_data_as();
         }
     }
 
     fn save_data_as(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("JSON", &["json"])
-            .set_title("另存为")
-            .save_file()
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_title("另存为")
+                .save_file()
+            {
+                let pkey = path.to_string_lossy().to_string();
+                match serde_json::to_string_pretty(&self.data) {
+                    Ok(json) => {
+                        if let Err(e) = crate::platform::write(&pkey, json.as_bytes()) {
+                            eprintln!("保存数据失败: {}", e);
+                        } else {
+                            self.current_file_path = Some(path.clone());
+                            self.update_last_edited_file(&path);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("序列化数据失败: {}", e);
+                    }
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
         {
             match serde_json::to_string_pretty(&self.data) {
                 Ok(json) => {
-                    if let Err(e) = std::fs::write(&path, json) {
-                        eprintln!("保存数据失败: {}", e);
-                    } else {
-                        // 保存成功后，更新当前文件路径和最近编辑的文件路径
-                        self.current_file_path = Some(path.clone());
-                        self.update_last_edited_file(&path);
-                    }
+                    self.web_file_ui = Some(WebFileUi::Export {
+                        suggested_name: "venncv_data.json".to_string(),
+                        body: json,
+                    });
                 }
-                Err(e) => {
-                    eprintln!("序列化数据失败: {}", e);
-                }
+                Err(e) => eprintln!("序列化数据失败: {}", e),
             }
         }
     }
 
     fn import_data(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("JSON", &["json"])
-            .set_title("导入数据文件")
-            .pick_file()
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                match serde_json::from_str::<AppData>(&content) {
-                    Ok(imported_data) => {
-                        // 合并导入的数据（保留当前数据，添加或更新导入的数据）
-                        // 合并项目
-                        for (id, project) in imported_data.projects {
-                            self.data.projects.insert(id, project);
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_title("导入数据文件")
+                .pick_file()
+            {
+                let pkey = path.to_string_lossy().to_string();
+                if let Ok(content) = crate::platform::read_to_string(&pkey) {
+                    self.merge_import_json(&content);
+                } else {
+                    eprintln!("读取文件失败");
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web_file_ui = Some(WebFileUi::Import {
+                draft: String::new(),
+                replace_workspace: false,
+            });
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn render_web_file_ui(&mut self, ctx: &Context) {
+        use egui::{TextEdit, Window};
+
+        let Some(current) = self.web_file_ui.take() else { return };
+
+        let mut keep: Option<WebFileUi> = None;
+        let mut import_action: Option<(bool, String)> = None;
+
+        match current {
+            WebFileUi::Import {
+                mut draft,
+                replace_workspace,
+            } => {
+                let title = if replace_workspace {
+                    "浏览器：打开数据（JSON）"
+                } else {
+                    "浏览器：合并导入（JSON）"
+                };
+                let mut open = true;
+                Window::new(title)
+                    .open(&mut open)
+                    .default_width(520.0)
+                    .show(ctx, |ui| {
+                        ui.label("将 JSON 粘贴到下方（可与桌面版导出文件一致）。");
+                        ui.add_sized(
+                            [ui.available_width(), 220.0],
+                            TextEdit::multiline(&mut draft).code_editor(),
+                        );
+                        if ui.button("确定").clicked() {
+                            import_action = Some((replace_workspace, draft.clone()));
                         }
-                        // 合并领域
-                        for (id, field) in imported_data.fields {
-                            self.data.fields.insert(id, field);
-                        }
-                        // 合并关系（去重）
-                        for relation in imported_data.relations {
-                            if !self.data.relations.iter().any(|r| {
-                                r.from_id == relation.from_id && r.to_id == relation.to_id
-                            }) {
-                                self.data.relations.push(relation);
+                    });
+
+                if let Some((rw, text)) = import_action {
+                    if rw {
+                        match serde_json::from_str::<AppData>(&text) {
+                            Ok(data) => {
+                                self.data = data.clone();
+                                let pb = std::path::PathBuf::from("web_session.json");
+                                self.current_file_path = Some(pb.clone());
+                                self.selected_project = None;
+                                self.editing_project = None;
+                                self.project_edit_buffer = None;
+                                self.validate_and_fix_project_positions();
+                                self.history = vec![self.data.clone()];
+                                self.history_index = 0;
+                                self.update_last_edited_file(&pb);
+                            }
+                            Err(e) => {
+                                log::warn!("JSON 解析失败: {}", e);
+                                keep = Some(WebFileUi::Import {
+                                    draft: text,
+                                    replace_workspace: rw,
+                                });
                             }
                         }
-                        // 保存到历史
-                        self.save_to_history();
+                    } else {
+                        match serde_json::from_str::<AppData>(&text) {
+                            Ok(_) => {
+                                self.merge_import_json(&text);
+                            }
+                            Err(e) => {
+                                log::warn!("JSON 解析失败: {}", e);
+                                keep = Some(WebFileUi::Import {
+                                    draft: text,
+                                    replace_workspace: false,
+                                });
+                            }
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("导入数据失败: {}", e);
+                } else if open && !ctx.input(|i| i.key_pressed(Key::Escape)) {
+                    keep = Some(WebFileUi::Import {
+                        draft,
+                        replace_workspace,
+                    });
+                }
+            }
+            WebFileUi::Export {
+                suggested_name,
+                mut body,
+            } => {
+                let mut open = true;
+                Window::new("浏览器：导出 JSON")
+                    .open(&mut open)
+                    .default_width(520.0)
+                    .show(ctx, |ui| {
+                        ui.label(format!(
+                            "请全选下方文本，复制到本地文件（建议文件名：{}）。",
+                            suggested_name
+                        ));
+                        ui.add_sized(
+                            [ui.available_width(), 260.0],
+                            TextEdit::multiline(&mut body).code_editor(),
+                        );
+                    });
+                if open && !ctx.input(|i| i.key_pressed(Key::Escape)) {
+                    keep = Some(WebFileUi::Export {
+                        suggested_name,
+                        body,
+                    });
+                }
+            }
+        }
+        self.web_file_ui = keep;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_web_file_ui(&mut self, _ctx: &Context) {}
+
+    fn merge_import_json(&mut self, content: &str) {
+        match serde_json::from_str::<AppData>(content) {
+            Ok(imported_data) => {
+                for (id, project) in imported_data.projects {
+                    self.data.projects.insert(id, project);
+                }
+                for (id, field) in imported_data.fields {
+                    self.data.fields.insert(id, field);
+                }
+                for relation in imported_data.relations {
+                    if !self
+                        .data
+                        .relations
+                        .iter()
+                        .any(|r| r.from_id == relation.from_id && r.to_id == relation.to_id)
+                    {
+                        self.data.relations.push(relation);
                     }
                 }
-            } else {
-                eprintln!("读取文件失败");
+                self.save_to_history();
+            }
+            Err(e) => {
+                eprintln!("导入数据失败: {}", e);
             }
         }
     }
 
     fn export_data(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("JSON", &["json"])
-            .set_title("导出数据文件")
-            .save_file()
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            match serde_json::to_string_pretty(&self.data) {
-                Ok(json) => {
-                    if let Err(e) = std::fs::write(&path, json) {
-                        eprintln!("导出数据失败: {}", e);
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_title("导出数据文件")
+                .save_file()
+            {
+                let pkey = path.to_string_lossy().to_string();
+                match serde_json::to_string_pretty(&self.data) {
+                    Ok(json) => {
+                        if let Err(e) = crate::platform::write(&pkey, json.as_bytes()) {
+                            eprintln!("导出数据失败: {}", e);
+                        }
                     }
-                }
-                Err(e) => {
-                    eprintln!("序列化数据失败: {}", e);
+                    Err(e) => {
+                        eprintln!("序列化数据失败: {}", e);
+                    }
                 }
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            match serde_json::to_string_pretty(&self.data) {
+                Ok(json) => {
+                    self.web_file_ui = Some(WebFileUi::Export {
+                        suggested_name: "venncv_export.json".to_string(),
+                        body: json,
+                    });
+                }
+                Err(e) => eprintln!("序列化数据失败: {}", e),
+            }
+        }
+    }
+
+    fn config_yaml_path(&self) -> String {
+        self.resolve_data_path("config.yaml")
+            .to_string_lossy()
+            .to_string()
     }
 
     /// 验证用户登录，从config.yaml读取用户信息
     /// 返回 (数据存储路径, 最近编辑的文件路径)
     fn verify_user(&self, username: &str, password: &str) -> Result<Option<(Option<String>, Option<String>)>, String> {
-        let config_path = "config.yaml";
-        
+        let config_path = self.config_yaml_path();
+
         // 如果config.yaml不存在，创建默认配置
-        if !std::path::Path::new(config_path).exists() {
+        if !crate::platform::exists(&config_path) {
             let default_config = crate::models::UserConfig {
                 users: vec![
                     crate::models::UserConfigEntry {
                         username: "admin".to_string(),
                         password_hash: "admin".to_string(),  // 简单实现，实际应使用加密
-                        data_storage_path: None,
+                        data_storage_path: Some("users/admin".to_string()),
                         last_edited_file: None,
                     }
                 ],
@@ -2669,8 +2648,8 @@ impl VennCVApp {
 
     /// 加载config.yaml
     fn load_config(&self) -> Result<crate::models::UserConfig, String> {
-        let config_path = "config.yaml";
-        let content = std::fs::read_to_string(config_path)
+        let config_path = self.config_yaml_path();
+        let content = crate::platform::read_to_string(&config_path)
             .map_err(|e| format!("读取配置文件失败: {}", e))?;
         serde_yaml::from_str(&content)
             .map_err(|e| format!("解析配置文件失败: {}", e))
@@ -2678,10 +2657,10 @@ impl VennCVApp {
 
     /// 保存config.yaml
     fn save_config(&self, config: &crate::models::UserConfig) -> Result<(), String> {
-        let config_path = "config.yaml";
+        let config_path = self.config_yaml_path();
         let yaml = serde_yaml::to_string(config)
             .map_err(|e| format!("序列化配置失败: {}", e))?;
-        std::fs::write(config_path, yaml)
+        crate::platform::write(&config_path, yaml.as_bytes())
             .map_err(|e| format!("保存配置文件失败: {}", e))?;
         Ok(())
     }
@@ -2701,15 +2680,18 @@ impl VennCVApp {
         }
 
         // 创建用户目录
-        let users_dir = "users";
-        if !std::path::Path::new(users_dir).exists() {
-            std::fs::create_dir_all(users_dir)
+        let users_dir = self.resolve_data_path("users").to_string_lossy().to_string();
+        if !crate::platform::exists(&users_dir) {
+            crate::platform::create_dir_all(&users_dir)
                 .map_err(|e| format!("创建用户目录失败: {}", e))?;
         }
 
-        let user_dir = format!("{}/{}", users_dir, username);
-        if !std::path::Path::new(&user_dir).exists() {
-            std::fs::create_dir_all(&user_dir)
+        let user_dir = self
+            .resolve_data_path(&format!("users/{}", username))
+            .to_string_lossy()
+            .to_string();
+        if !crate::platform::exists(&user_dir) {
+            crate::platform::create_dir_all(&user_dir)
                 .map_err(|e| format!("创建用户目录失败: {}", e))?;
         }
 
@@ -2717,7 +2699,7 @@ impl VennCVApp {
         config.users.push(crate::models::UserConfigEntry {
             username: username.to_string(),
             password_hash: password.to_string(),  // 简单实现，实际应使用加密
-            data_storage_path: Some(user_dir.clone()),
+            data_storage_path: Some(format!("users/{}", username)),
             last_edited_file: None,
         });
 
@@ -2735,14 +2717,7 @@ impl VennCVApp {
             
             // 验证文件路径是否属于当前用户的数据存储路径
             let file_belongs_to_user = if let Some(ref storage_path) = self.user_data_storage_path {
-                // 将路径标准化后进行比较
-                let file_path_normalized = file_path.canonicalize()
-                    .unwrap_or_else(|_| file_path.to_path_buf());
-                let storage_path_normalized = std::path::Path::new(storage_path).canonicalize()
-                    .unwrap_or_else(|_| std::path::Path::new(storage_path).to_path_buf());
-                
-                // 检查文件路径是否在存储路径下
-                file_path_normalized.starts_with(&storage_path_normalized)
+                crate::platform::file_under_storage(file_path, storage_path)
             } else {
                 // 如果没有设置存储路径，允许更新（向后兼容）
                 true
@@ -2773,7 +2748,8 @@ impl VennCVApp {
         }
     }
 
-    /// 设置数据存储路径
+    /// 设置数据存储路径（桌面端：文件夹选择；Web：不适用）
+    #[cfg(not(target_arch = "wasm32"))]
     fn set_data_storage_path(&mut self) {
         if let Some(username) = &self.current_user {
             // 选择文件夹
@@ -2782,7 +2758,7 @@ impl VennCVApp {
                 .pick_folder()
             {
                 let path_str = path.to_string_lossy().to_string();
-                
+
                 // 更新当前用户的数据存储路径
                 match self.load_config() {
                     Ok(mut config) => {
@@ -2806,7 +2782,13 @@ impl VennCVApp {
         }
     }
 
-    /// 从存储路径加载数据文件列表
+    #[cfg(target_arch = "wasm32")]
+    fn set_data_storage_path(&mut self) {
+        log::info!("浏览器版使用本地存储，无需设置数据目录；请用「打开/导入」加载 JSON。");
+    }
+
+    /// 从存储路径加载数据文件（桌面端：文件对话框；Web：请用「打开」）
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_from_storage_path(&mut self) {
         if let Some(ref storage_path) = self.user_data_storage_path {
             // 使用文件对话框，设置初始目录为存储路径
@@ -2816,30 +2798,37 @@ impl VennCVApp {
                 .set_directory(storage_path)
                 .pick_file()
             {
-                                if let Ok(content) = std::fs::read_to_string(&path) {
-                                    match serde_json::from_str::<crate::models::AppData>(&content) {
-                                        Ok(data) => {
-                                            self.data = data.clone();
-                                            self.current_file_path = Some(path.clone());
-                                            self.selected_project = None;
-                                            self.editing_project = None;
-                                            // 重置历史
-                                            self.history = vec![data];
-                                            self.history_index = 0;
-                                            // 更新最近编辑的文件路径
-                                            self.update_last_edited_file(&path);
-                                        }
-                                        Err(e) => {
-                                            eprintln!("加载数据失败: {}", e);
-                                        }
-                                    }
-                                } else {
-                                    eprintln!("读取文件失败");
-                                }
+                let pkey = path.to_string_lossy().to_string();
+                if let Ok(content) = crate::platform::read_to_string(&pkey) {
+                    match serde_json::from_str::<crate::models::AppData>(&content) {
+                        Ok(data) => {
+                            self.data = data.clone();
+                            self.current_file_path = Some(path.clone());
+                            self.selected_project = None;
+                            self.editing_project = None;
+                            self.project_edit_buffer = None;
+                            // 重置历史
+                            self.history = vec![data];
+                            self.history_index = 0;
+                            // 更新最近编辑的文件路径
+                            self.update_last_edited_file(&path);
+                        }
+                        Err(e) => {
+                            eprintln!("加载数据失败: {}", e);
+                        }
+                    }
+                } else {
+                    eprintln!("读取文件失败");
+                }
             }
         } else {
             eprintln!("请先设置数据存储路径");
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_from_storage_path(&mut self) {
+        log::info!("浏览器版请使用菜单「打开」粘贴 JSON。");
     }
 
     /// 检查项目位置是否正确（整个项目圆圈在所有目标领域内，且整个圆圈不在非目标领域内）
@@ -3109,7 +3098,8 @@ impl VennCVApp {
         dist < threshold
     }
     
-    /// 重新计算所有项目位置（用于领域位置变化后）
+    /// 重新计算所有项目位置（用于领域位置变化后；当前未接菜单，保留备用）
+    #[allow(dead_code)]
     fn recalculate_all_project_positions(&mut self) {
         let project_ids: Vec<String> = self.data.projects.keys().cloned().collect();
         for id in project_ids {
@@ -3123,7 +3113,7 @@ impl VennCVApp {
     }
     
     /// 重新计算所有项目位置（带随机抖动，用于领域顺序变化后）
-    fn recalculate_all_project_positions_with_jitter(&mut self) {
+    pub(crate) fn recalculate_all_project_positions_with_jitter(&mut self) {
         use std::time::{SystemTime, UNIX_EPOCH};
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -3132,12 +3122,12 @@ impl VennCVApp {
         
         let project_ids: Vec<String> = self.data.projects.keys().cloned().collect();
         for (idx, id) in project_ids.iter().enumerate() {
-            if let Some(project) = self.data.projects.get(id).cloned() {
+            if self.data.projects.get(id).is_some() {
                 // 先给位置加入随机抖动，避免完全重叠
                 let jitter_seed = seed.wrapping_add(idx as u64);
                 let jitter_x = ((jitter_seed % 100) as f32 - 50.0) * 0.5;
                 let jitter_y = (((jitter_seed / 100) % 100) as f32 - 50.0) * 0.5;
-                
+
                 if let Some(p) = self.data.projects.get_mut(id) {
                     p.position.0 += jitter_x;
                     p.position.1 += jitter_y;
@@ -3155,7 +3145,11 @@ impl VennCVApp {
     }
     
     /// 验证并修正所有项目位置（使用物理引擎思想）
-    fn validate_and_fix_project_positions(&mut self) {
+    pub(crate) fn validate_and_fix_project_positions(&mut self) {
+        self.validate_and_fix_project_positions_inner(true);
+    }
+
+    fn validate_and_fix_project_positions_inner(&mut self, record_history: bool) {
         let mut changed = false;
         
         // 第一步：先确保所有项目在正确的区域内
@@ -3336,7 +3330,7 @@ impl VennCVApp {
             }
         }
         
-        if changed {
+        if changed && record_history {
             self.save_to_history();
         }
     }
@@ -3537,8 +3531,8 @@ impl VennCVApp {
                 .collect();
             
             // 计算远离其他领域的方向
-            let (preferred_angle, use_opposite) = if !other_fields.is_empty() {
-                // 计算从目标领域中心指向其他领域中心的平均方向
+            let (_preferred_angle, _use_opposite) = if !other_fields.is_empty() {
+                // 预留：可按「远离其他领域」方向微调；当前候选位置由下方黄金角螺旋覆盖
                 let mut avg_dx = 0.0;
                 let mut avg_dy = 0.0;
                 for other in &other_fields {
@@ -3547,8 +3541,6 @@ impl VennCVApp {
                 }
                 avg_dx /= other_fields.len() as f32;
                 avg_dy /= other_fields.len() as f32;
-                
-                // 使用相反方向（远离其他领域）
                 let opposite_angle = (-avg_dy).atan2(-avg_dx);
                 (opposite_angle, true)
             } else {
@@ -3558,12 +3550,6 @@ impl VennCVApp {
             // 安全边距
             let safe_margin = project_radius + 15.0;
             let max_safe_radius = target_field.radius - safe_margin;
-            
-            // 收集该领域内已有项目的位置（用于找最空白的位置）
-            let existing_projects: Vec<(f32, f32, f32)> = self.data.projects.values()
-                .filter(|p| p.id != project.id && p.field_ids.contains(&target_field.id))
-                .map(|p| (p.position.0, p.position.1, p.radius))
-                .collect();
             
             // 生成候选位置并评分（离已有项目越远越好）
             let golden_angle = 2.399963229728653;  // 黄金角 ≈ 137.5°
@@ -3713,20 +3699,6 @@ impl VennCVApp {
             .filter(|f| !project.field_ids.contains(&f.id))
             .collect();
         
-        // 计算远离非目标领域的方向
-        let mut away_dir_x = 0.0;
-        let mut away_dir_y = 0.0;
-        for non_target in &non_target_fields {
-            // 从非目标领域中心指向目标领域平均中心的方向
-            away_dir_x += center_x - non_target.position.0;
-            away_dir_y += center_y - non_target.position.1;
-        }
-        let away_len = (away_dir_x * away_dir_x + away_dir_y * away_dir_y).sqrt();
-        if away_len > 0.0 {
-            away_dir_x /= away_len;
-            away_dir_y /= away_len;
-        }
-        
         // 使用迭代方法找到所有领域的交集中心，同时尽量远离非目标领域
         let mut intersection_center_x = center_x;
         let mut intersection_center_y = center_y;
@@ -3875,26 +3847,11 @@ impl VennCVApp {
         (intersection_center_x, intersection_center_y)
     }
 
-    /// 根据完成度百分比计算边界颜色
-    /// 0% = 红色, 50% = 黄色, 100% = 绿色
+    /// 根据完成度百分比计算边界颜色（灰阶：低完成度偏白，高完成度偏黑）
     fn completion_percentage_to_color(&self, percentage: f32) -> Color32 {
         let p = percentage.clamp(0.0, 100.0) / 100.0;
-        
-        if p <= 0.5 {
-            // 0% - 50%: 红色到黄色
-            let ratio = p * 2.0; // 0.0 到 1.0
-            let r = 255.0;
-            let g = (255.0 * ratio) as u8;
-            let b = 0;
-            Color32::from_rgb(r as u8, g, b)
-        } else {
-            // 50% - 100%: 黄色到绿色
-            let ratio = (p - 0.5) * 2.0; // 0.0 到 1.0
-            let r = (255.0 * (1.0 - ratio)) as u8;
-            let g = 255;
-            let b = 0;
-            Color32::from_rgb(r, g, b)
-        }
+        let v = (255.0 * (1.0 - p)) as u8;
+        Color32::from_rgb(v, v, v)
     }
 
     /// 计算图例的矩形区域
@@ -4040,7 +3997,7 @@ impl VennCVApp {
         painter.text(
             pos2(legend_x + padding, current_y),
             Align2::LEFT_CENTER,
-            "完成度:",
+            "完成度（白→黑）:",
             FontId::proportional(10.0),
             Color32::DARK_GRAY,
         );
@@ -4053,21 +4010,17 @@ impl VennCVApp {
             
             current_y += item_height / 2.0;
             
-            // 绘制颜色圆圈（带边框）
             let circle_radius = 5.0;
             let circle_x = legend_x + padding + circle_radius;
-            // 先绘制白色填充
-            painter.circle_filled(
-                pos2(circle_x, current_y),
-                circle_radius,
-                Color32::WHITE,
-            );
-            // 绘制完成度颜色作为边框
-            painter.circle_stroke(
-                pos2(circle_x, current_y),
-                circle_radius,
-                (2.0, color),
-            );
+            painter.circle_filled(pos2(circle_x, current_y), circle_radius, color);
+            // 浅色块加灰边，避免与图例白底融为一体
+            if color.r() > 232 {
+                painter.circle_stroke(
+                    pos2(circle_x, current_y),
+                    circle_radius,
+                    (1.0, Color32::from_rgb(158, 158, 158)),
+                );
+            }
             
             // 绘制文本
             painter.text(
@@ -4084,7 +4037,7 @@ impl VennCVApp {
 
     /// 根据项目分布动态调整三个研究领域圆圈的位置和大小
     /// 确保三个圆圈有合适的交集区域
-    fn adjust_field_layout(&mut self) {
+    pub(crate) fn adjust_field_layout(&mut self) {
         // 统计每个领域和交集区域的项目数量
         let field_ids: Vec<String> = self.data.fields.keys().cloned().collect();
         if field_ids.len() != 3 {
@@ -4194,6 +4147,94 @@ impl VennCVApp {
             field3.position = (pos3_x, pos3_y);
             field3.radius = radius3;
         }
+    }
+
+    /// 同步主窗口标题：未登录为基准标题，登录后为「基准 [用户名]」。
+    fn sync_viewport_title(&self, ctx: &Context) {
+        let title = match (&self.is_logged_in, &self.current_user) {
+            (true, Some(name)) => format!("{} [{}]", VIEWPORT_TITLE_BASE, name),
+            _ => VIEWPORT_TITLE_BASE.to_string(),
+        };
+        ctx.send_viewport_cmd(ViewportCommand::Title(title));
+    }
+
+    /// 快捷键说明（帮助菜单）
+    fn shortcuts_help_dialog(&mut self, ctx: &Context) {
+        let theme = Theme::light();
+        let rows: [(&str, &str); 15] = [
+            ("⌘/Ctrl + S", "保存当前文件"),
+            ("⌘/Ctrl + Z", "撤销"),
+            ("⌘/Ctrl + Shift + Z", "重做"),
+            ("⌘/Ctrl + N", "新建项目"),
+            ("⌘/Ctrl + Tab", "进入/退出工具栏焦点模式"),
+            ("Tab / Shift+Tab", "下一项目 / 上一项目（无工具栏焦点时）"),
+            ("Tab / Shift+Tab", "工具栏内切换按钮（有工具栏焦点时）"),
+            ("Enter", "触发当前选中的工具栏按钮"),
+            ("Esc", "取消选中项目与工具栏焦点"),
+            ("Ctrl + + / Ctrl + =", "放大可视化"),
+            ("Ctrl + -", "缩小可视化"),
+            ("Ctrl + 0", "重置缩放"),
+            ("⌘/Ctrl + 点击项目", "与当前选中项建立实线关系"),
+            ("⌘/Ctrl + Shift + 点击项目", "与当前选中项建立虚线关系"),
+            ("回车（登录页）", "登录（创建用户窗口打开时不触发）"),
+        ];
+
+        egui::Window::new("快捷键一览")
+            .open(&mut self.show_shortcuts_dialog)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([520.0, 440.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(
+                        "说明：⌘ 为 macOS Command；在 Windows / Linux 上对应 Ctrl（由 egui 的 Command 修饰键统一处理）。",
+                    )
+                    .size(11.0)
+                    .color(theme.text_secondary),
+                );
+                ui.add_space(10.0);
+                ScrollArea::vertical().show(ui, |ui| {
+                    for (keys, desc) in rows {
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [200.0, 0.0],
+                                Label::new(RichText::new(keys).strong().monospace()),
+                            );
+                            ui.label(desc);
+                        });
+                        ui.add_space(4.0);
+                    }
+                });
+            });
+    }
+
+    fn about_dialog(&mut self, ctx: &Context) {
+        let theme = Theme::light();
+        egui::Window::new("关于 VennCV")
+            .open(&mut self.show_about_dialog)
+            .collapsible(false)
+            .resizable(false)
+            .default_size([360.0, 200.0])
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(8.0);
+                    ui.heading(
+                        RichText::new("VennCV")
+                            .size(22.0)
+                            .color(theme.text_primary),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("版本 {}", env!("CARGO_PKG_VERSION")))
+                            .color(theme.text_secondary),
+                    );
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new("本地科研项目与韦恩图式可视化管理。")
+                            .color(theme.text_primary),
+                    );
+                });
+            });
     }
     
     /// 设置对话框 - VSCode风格
@@ -4328,6 +4369,46 @@ impl VennCVApp {
                     ui.add_space(16.0);
                     ui.separator();
                     ui.add_space(12.0);
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("本地数据根目录")
+                                    .size(12.0)
+                                    .color(theme.text_secondary),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new("config.yaml 与 users/ 保存在此目录；留空则使用启动时的当前工作目录。本窗口仍读写运行目录下的 app_settings.yaml。")
+                                    .size(10.0)
+                                    .color(theme.text_secondary),
+                            );
+                            ui.add_space(8.0);
+                            ui.add(
+                                TextEdit::multiline(&mut self.settings.user_files_directory)
+                                    .desired_width(ui.available_width())
+                                    .desired_rows(2)
+                                    .hint_text("例如 /Users/你/Documents/VennCVData"),
+                            );
+                            ui.add_space(8.0);
+                            if ui
+                                .button(RichText::new("选择文件夹…").size(12.0))
+                                .clicked()
+                            {
+                                if let Some(p) = rfd::FileDialog::new()
+                                    .set_title("选择 VennCV 数据根目录")
+                                    .pick_folder()
+                                {
+                                    self.settings.user_files_directory =
+                                        p.to_string_lossy().to_string();
+                                }
+                            }
+                        });
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(12.0);
+                    }
                     
                     // 用户设置
                     ui.vertical(|ui| {
@@ -4415,6 +4496,7 @@ impl VennCVApp {
                             self.visualization_zoom = self.settings.default_zoom;
                             // 保存设置
                             self.save_settings();
+                            self.load_available_users();
                             self.show_settings_dialog = false;
                         }
                         ui.add_space(8.0);
@@ -4528,8 +4610,8 @@ impl VennCVApp {
     /// 加载应用设置
     fn load_settings(&mut self) {
         let settings_path = "app_settings.yaml";
-        if std::path::Path::new(settings_path).exists() {
-            if let Ok(content) = std::fs::read_to_string(settings_path) {
+        if crate::platform::exists(settings_path) {
+            if let Ok(content) = crate::platform::read_to_string(settings_path) {
                 if let Ok(settings) = serde_yaml::from_str::<AppSettings>(&content) {
                     self.settings = settings;
                     return;
@@ -4539,164 +4621,14 @@ impl VennCVApp {
         // 如果加载失败，使用默认设置
         self.settings = AppSettings::default();
     }
-    
+
     /// 保存应用设置
     fn save_settings(&self) {
         let settings_path = "app_settings.yaml";
         if let Ok(yaml) = serde_yaml::to_string(&self.settings) {
-            if let Err(e) = std::fs::write(settings_path, yaml) {
+            if let Err(e) = crate::platform::write(settings_path, yaml.as_bytes()) {
                 eprintln!("保存设置失败: {}", e);
             }
-        }
-    }
-    
-    /// 为admin用户创建复杂的初始数据（用于展示功能）
-    fn create_admin_initial_data(&self) -> AppData {
-        let mut fields = indexmap::IndexMap::new();
-        let mut projects = indexmap::IndexMap::new();
-        let mut relations = Vec::new();
-        let mut relation_tags = vec![
-            "依赖".to_string(),
-            "扩展".to_string(),
-            "参考".to_string(),
-            "补充".to_string(),
-            "替代".to_string(),
-        ];
-
-        // 初始化三个研究方向
-        fields.insert("rna_structure".to_string(), ResearchField {
-            id: "rna_structure".to_string(),
-            name: "RNA结构".to_string(),
-            description: "RNA结构研究".to_string(),
-            position: (400.0, 200.0),
-            radius: 200.0,
-        });
-
-        fields.insert("microbial_ecology".to_string(), ResearchField {
-            id: "microbial_ecology".to_string(),
-            name: "微生物生态".to_string(),
-            description: "微生物生态研究".to_string(),
-            position: (200.0, 500.0),
-            radius: 200.0,
-        });
-
-        fields.insert("bioinfo_tools".to_string(), ResearchField {
-            id: "bioinfo_tools".to_string(),
-            name: "生信工具开发".to_string(),
-            description: "生物信息学工具开发".to_string(),
-            position: (600.0, 500.0),
-            radius: 200.0,
-        });
-
-        // 添加多个项目，展示不同状态和领域
-        projects.insert("project_1".to_string(), Project {
-            id: "project_1".to_string(),
-            name: "itol.toolkit".to_string(),
-            description: "iTOL工具包，用于可视化系统发育树".to_string(),
-            status: ProjectStatus::Published,
-            field_ids: vec!["bioinfo_tools".to_string()],
-            position: (550.0, 450.0),
-            radius: 20.0,
-            completion_percentage: 100.0,
-        });
-
-        projects.insert("project_2".to_string(), Project {
-            id: "project_2".to_string(),
-            name: "VnFinder".to_string(),
-            description: "VnFinder工具，用于病毒发现".to_string(),
-            status: ProjectStatus::Published,
-            field_ids: vec!["microbial_ecology".to_string()],
-            position: (250.0, 450.0),
-            radius: 20.0,
-            completion_percentage: 100.0,
-        });
-
-        projects.insert("project_3".to_string(), Project {
-            id: "project_3".to_string(),
-            name: "RNA结构预测工具".to_string(),
-            description: "基于深度学习的RNA二级结构预测".to_string(),
-            status: ProjectStatus::Submitted,
-            field_ids: vec!["rna_structure".to_string(), "bioinfo_tools".to_string()],
-            position: (450.0, 300.0),
-            radius: 20.0,
-            completion_percentage: 90.0,
-        });
-
-        projects.insert("project_4".to_string(), Project {
-            id: "project_4".to_string(),
-            name: "微生物群落分析".to_string(),
-            description: "16S rRNA测序数据分析流程".to_string(),
-            status: ProjectStatus::HighPriority,
-            field_ids: vec!["microbial_ecology".to_string()],
-            position: (200.0, 450.0),
-            radius: 20.0,
-            completion_percentage: 60.0,
-        });
-
-        projects.insert("project_5".to_string(), Project {
-            id: "project_5".to_string(),
-            name: "RNA-RNA相互作用预测".to_string(),
-            description: "预测RNA分子间的相互作用".to_string(),
-            status: ProjectStatus::SteadyProgress,
-            field_ids: vec!["rna_structure".to_string()],
-            position: (400.0, 250.0),
-            radius: 20.0,
-            completion_percentage: 40.0,
-        });
-
-        projects.insert("project_6".to_string(), Project {
-            id: "project_6".to_string(),
-            name: "新工具开发计划".to_string(),
-            description: "计划开发的新生物信息学工具".to_string(),
-            status: ProjectStatus::ToBeStarted,
-            field_ids: vec!["bioinfo_tools".to_string()],
-            position: (600.0, 450.0),
-            radius: 20.0,
-            completion_percentage: 0.0,
-        });
-
-        // 添加多个关系，展示不同类型的连接
-        relations.push(ProjectRelation {
-            from_id: "project_1".to_string(),
-            to_id: "project_2".to_string(),
-            relation_type: RelationType::Direct,
-            tags: vec!["依赖".to_string()],
-            color: [0, 0, 255, 255],
-            width: 2.0,
-        });
-
-        relations.push(ProjectRelation {
-            from_id: "project_3".to_string(),
-            to_id: "project_1".to_string(),
-            relation_type: RelationType::Indirect,
-            tags: vec!["参考".to_string()],
-            color: [128, 128, 128, 255],
-            width: 1.5,
-        });
-
-        relations.push(ProjectRelation {
-            from_id: "project_4".to_string(),
-            to_id: "project_2".to_string(),
-            relation_type: RelationType::Direct,
-            tags: vec!["扩展".to_string()],
-            color: [0, 128, 0, 255],
-            width: 2.5,
-        });
-
-        relations.push(ProjectRelation {
-            from_id: "project_5".to_string(),
-            to_id: "project_3".to_string(),
-            relation_type: RelationType::Indirect,
-            tags: vec!["补充".to_string()],
-            color: [255, 165, 0, 255],
-            width: 1.8,
-        });
-
-        AppData {
-            fields,
-            projects,
-            relations,
-            relation_tags,
         }
     }
     
@@ -4704,15 +4636,19 @@ impl VennCVApp {
 
 impl eframe::App for VennCVApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // 在所有UI渲染之前消耗Tab键并处理，防止egui默认焦点切换
+        #[cfg(target_arch = "wasm32")]
+        self.run_e2e_auto_login_if_pending();
+
+        self.sync_viewport_title(ctx);
+
+        // 在所有 UI 渲染之前处理 Tab：consume_key 后 egui 不再用 Tab 做默认焦点切换。
+        // 切勿每帧 request_focus(Id::NULL)，否则会清掉属性栏名称/描述等 TextEdit 的焦点，导致无法输入。
         if self.is_logged_in {
-            // 清除egui的焦点，防止Tab键导航到UI元素
-            ctx.memory_mut(|m| m.request_focus(egui::Id::NULL));
-            
-            // 消耗Tab键事件并获取状态
+            // 消耗 Tab 键事件并获取状态
             let tab_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab));
             let shift_tab_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, Key::Tab));
-            let cmd_tab_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::MAC_CMD, Key::Tab));
+            let cmd_tab_pressed =
+                ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Tab));
             
             // 处理Tab键逻辑
             if cmd_tab_pressed {
@@ -4755,7 +4691,27 @@ impl eframe::App for VennCVApp {
             if self.show_legend_settings {
                 self.legend_settings_dialog(ctx);
             }
+            if self.show_shortcuts_dialog {
+                self.shortcuts_help_dialog(ctx);
+            }
+            if self.show_about_dialog {
+                self.about_dialog(ctx);
+            }
             self.main_ui(ctx);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.e2e_from_url && self.is_logged_in {
+                if self.e2e_ui_frames_after_login < 3 {
+                    self.e2e_ui_frames_after_login = self.e2e_ui_frames_after_login.saturating_add(1);
+                    if self.e2e_ui_frames_after_login == 2 {
+                        Self::e2e_merge_venncv_field("phase", "main_ui");
+                    }
+                }
+            } else {
+                self.e2e_ui_frames_after_login = 0;
+            }
         }
     }
 }

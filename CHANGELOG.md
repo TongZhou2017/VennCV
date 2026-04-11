@@ -1,0 +1,125 @@
+# Changelog
+
+本文件记录 VennCV 的用户可见变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)（主版本.次版本.修订号）；**次版本号（第二位）** 在引入较多新能力或架构调整时递增。
+
+## [0.5.5] - 2026-04-11
+
+### 仓库与文档
+
+- **目录整理**：`docs/` 仅作开发历程与内部记录用，**不纳入 Git**（见 [`.gitignore`](.gitignore)）；**Trunk + egui WASM** 入口迁至 [`legacy/wasm/`](legacy/wasm/)，构建产物输出至 `legacy/wasm/dist/`（请在子目录执行 `trunk build` / `trunk serve`）。
+- **构建产物与本地配置**：根目录 `dist/`、`legacy/wasm/dist/`、`web/dist/` 与本地 `app_settings.yaml` 列入 [`.gitignore`](.gitignore)；仓库提供 [`app_settings.example.yaml`](app_settings.example.yaml) 作为设置模板。
+- **字体**：Noto Sans SC 与许可说明迁至 [`web/public/fonts/`](web/public/fonts/)，供 Web CSS 与 WASM `include_bytes!` 共用。
+
+### Web / 浏览器
+
+#### 回收站与数据
+
+- **回收站工作流**：删除改为 **移入回收站**（侧栏列表 **×**、工具栏 **批量回收站**）；侧栏 **🗑 回收站** 可 **复原** 或 **永久删除**；`deleted_projects` 随工作区持久化，导入/导出在有条目时写出。
+- **回收站与连线**：移入回收站时，涉及该项目的 **关系** 从 `relations` 移除并 **暂存** 到 `deleted_relation_stash`；**复原** 时在两端项目均存在的前提下 **写回**（按 `from_id`/`to_id` 去重）。另一端仍在回收站时，边 **暂存保留**，支持 **分批复原** 后仍恢复连线。
+- **永久删除**：从回收站清除某项目时，同步从 `deleted_relation_stash` 去掉所有涉及该 id 的关系。
+- **导入合并**：合并导入时 **拼接** 双方的 `deleted_relation_stash`；导出在暂存非空时写出该字段。
+
+#### 多选、批量与画布隐藏
+
+- **多选**：**Shift+点击** 在画布/侧栏 **累加或取消** 选中；工具栏显示已选数量，**清多选 / 单选** 可只保留当前主选一项。
+- **按条件扩选**：**同状态**、**同领域**（所属领域集合完全相同）、**同名**（去首尾空格），均以当前选中项为基准选中一批项目。
+- **画布隐藏**：属性中可隐藏项目在 **画布上的圆**；隐藏项 **不绘制** 且 **不参与关系线端点**；侧栏以 **半透明 / 标记** 区分。工具栏 **隐画布 / 显画布** 支持批量切换。
+
+#### 布局稳定性（拖放、载入、属性编辑）
+
+- **拖放项目**：提交位置时使用 **不修改领域几何** 的校验路径（`mutateFields: false` + 仅项目排斥/越界吸附），避免连续拖动时 **反复撑大领域、挤扁三圆交集** 与性能问题。
+- **登录 / 打开工作区 / 恢复版本**：使用 `**validateAppDataPreserveUserLayout`**，**保留 JSON 中的项目坐标**，仅修复 NaN、无效关系、明显越界等，减轻「每次进入整图被重排」。
+- **编辑描述与纯属性**：侧栏提交时若 **领域归属、圆心、半径、画布隐藏** 未变（仅名称、描述、状态、完成度等），则 `**skipLayoutValidate`** 跳过整图布局校验，避免 **改文案却改变可视化尺寸与排布**。从回收站 **复原** 时同样跳过整图校验，避免仅恢复数据牵动全局坐标。
+
+---
+
+## [0.5.4] - 2026-04-10
+
+### Web / 浏览器
+
+- **完成度颜色**：项目圆描边与图例改为 **灰阶（白→黑，完成度由低到高）**，与桌面端一致；浅色图例块加描边以免白底不可见。
+- **维恩布局**：入口自侧栏移至 **工具栏双圆相交图标**，侧栏仅保留「+」。
+- **时间戳检查点（🕐）**：成功后（或失败时）在工具栏下方显示 **短暂文字提示**（绿/红条）。
+- **版本与分支**：支持 **删除分支**（不可删 `main`）；删除当前分支时自动回落到主分支并加载其顶端快照。
+- **布局与预览**：工具栏 **左栏 / 右栏** 切换侧栏显隐；**预览** 以绝对定位将 **可视化铺满主内容区**（与仅 flex 收栏不同），**Esc** 或画布上 **退出预览** 关闭。
+- **侧栏排序**：领域与项目列表的 **⋮** 使用 **Pointer 事件** 实现拖动换位（避免 Tauri/WebView 下 HTML5 拖放不生效）；**修复拖动领域后崩溃**：领域重排与校验会更新项目位置时，同步属性编辑缓冲区的几何字段，且 `fieldOrder`/`projectOrder` 与 `commitData` **单次原子写入**，避免属性面板自动保存与数据反复打架。
+
+### 桌面（Rust / egui）
+
+- **完成度**：边界色与图例改为 **白→黑灰阶**；图例标题为 **「完成度（白→黑）:」**，浅色样例带灰边。
+
+---
+
+## [0.5.3] - 2026-04-10
+
+### Web / 浏览器
+
+- **属性面板自动保存**：项目名称、描述、状态等侧栏编辑约 **450ms 防抖** 后自动合并到工作区并持久化；`beforeunload` 与面板卸载时 **立即 flush**，降低关页丢改风险。`commitData(..., skipHistory)` 路径也会写入工作区。
+- **版本与分支**：新增 `**users/<用户>/version_store.json`** 快照图（父子链、多分支 tip），工具栏 **🌿 版本与分支** 弹窗支持创建快照、恢复（可选恢复前备份至 `**__stash`** 分支）、从快照 **分叉**、**切换分支**、分支改名；可复制 **Mermaid** 文本做路线总览。
+- **时间戳检查点**：工具栏 **🕐** 一键：若有未合并的侧栏属性则先 **记入撤销栈**，再按当前时间追加一条 `**检查点 <本地化时间>`** 版本快照（与上述版本树同源）。
+- **存储错误提示**：`localStorage` 写入失败（含 **QuotaExceeded**）时不再静默抛错，顶部 **告警条** 提示原因；`saveWorkspace` / `saveUserConfig` 返回明确结果。
+
+---
+
+## [0.5.2] - 2026-04-10
+
+### 发布与分发
+
+- `**[.github/workflows/release-tauri.yml](.github/workflows/release-tauri.yml)`**：新增 **Release Tauri** 工作流，基于 [tauri-action](https://github.com/tauri-apps/tauri-action) 在 **macOS**（Apple Silicon / Intel 双架构）、**Ubuntu 22.04**、**Windows** 上并行构建，并将安装包上传到 **同一 GitHub Release**。
+- **触发方式**：推送 `**v*`** 标签（推荐，生成正式 Release）；或通过 Actions **手动运行**，指定标签并可选 **草稿 Release**（标签可在当前提交上自动创建）。
+- `**[README.md](README.md)`**：补充 **「GitHub 上发布安装包」** 说明（tag 推送、手动发布、未签名时的系统提示说明）。
+
+---
+
+## [0.5.1] - 2026-04-09
+
+### 桌面
+
+- **Tauri 2**：新增 `[src-tauri/](src-tauri/)`，在桌面 WebView 中加载与浏览器相同的 `**web/`** 构建产物（根目录 `npm run tauri:dev` / `npm run tauri:build`，需先 `npm install`）。移除 egui **原生** `cargo run` 入口；**Trunk + egui WASM** 仍为可选遗留路径。
+
+### CI
+
+- `[.github/workflows/ci.yml](.github/workflows/ci.yml)`：Rust 改为 `cargo build` / `cargo test`（无 `desktop` feature）；新增 **tauri** job（安装 Linux WebKit 依赖、`web` 构建、`src-tauri` `cargo build`）。
+
+### Web / 浏览器
+
+- **可视化缩放**：修正「缩小 zoom 时自动缩放几乎抵消」的问题（布局用固定参考计算最小屏幕半径，避免与 `autoScale × zoom` 相乘后失效）；滚轮缩放改为以指针位置为锚并微调曲线，缩放范围放宽（约 0.08～6）；画布上缩放反馈更明显、画面不易乱跳。
+- **领域圆与布局验证**：默认保持 **维恩图** 下的领域半径与相交关系；**优先只移动项目圆** 消除重叠与越界；仅在出现 **项目圆重叠** 或 **区域不合法** 等拥挤情况时才扩大领域圆；去掉按累计面积阈值「预防性」撑大领域；仅在领域已明显大于维恩名义尺寸后才微调圆心间距，避免把标准维恩相交误判为过度嵌套。
+- **领域列表操作**：**调整领域顺序**或**删除领域**后，剩余领域自动按当前顺序重新套用维恩圆心/半径布局（与新建/重排维恩一致）。
+
+---
+
+## [0.5.0] - 2026-04-10
+
+### 架构
+
+- **双轨交付**：在保留 Rust + egui 桌面端（及可选 Trunk WASM）的前提下，新增纯前端 `**web/` SPA**（Vite + React + TypeScript），数据 JSON 与 `models.rs` 约定一致，便于静态托管、免 wasm 工具链部署。
+- **Rust 侧栏模块化**：左侧「领域 + 项目」面板迁至 `[src/left_sidebar.rs](src/left_sidebar.rs)`，`app.rs` 以单点调用接入；配合 **egui_extras** 的 `StripBuilder` / `Size` 做列布局，减少手算宽度与 `allocate_ui_at_rect` 式布局。
+
+### Web / 浏览器
+
+- **开发调试端口**：Web 前端默认通过 `cd web && npm run dev` 启动 **Vite 开发服务器**，监听 **[http://127.0.0.1:5173](http://127.0.0.1:5173)**（可在 `web/vite.config.ts` 中调整 `server.port`）；`npm run preview` 用于本地预览 `npm run build` 产物。
+- **属性输入与焦点**：属性面板采用 **编辑缓冲 +「应用更改」** 提交，避免画布层（Konva）与全局状态高频联动导致输入框在重渲染时被抢焦点或「刷新打断输入」。
+- **项目选中路径**：除画布点击项目圆外，**左侧项目列表行点击**即可选中项目，并与右侧属性编辑、画布高亮保持一致。
+- **持久化与认证**：`localStorage` 键前缀 `**venncv_fs:`** 与既有 `platform.rs`（WASM）策略对齐；`config.yaml` 内容由 **js-yaml** 读写；支持多用户、`users/<用户名>/workspace.json` 工作区、撤销/重做栈、JSON 导入/合并与导出。
+
+### Rust / 桌面与构建
+
+- **侧栏布局**：领域行四列（拖动手柄 / 序号 / 名称 / 删除），项目行 `remainder` + 固定宽度状态列；在 Strip 落地后精简冗余 `ScrollArea::max_width` 等补偿。
+- **Trunk / WASM 辅助**：Trunk 配置中的注释说明在 `NO_COLOR=1` 环境下需使用 `env -u NO_COLOR trunk ...`（配置文件后迁至 `legacy/wasm/Trunk.toml`）；**serve 默认端口改为 8081**（减轻与本机 8080 冲突）；构建流水线依赖 **wasm-bindgen-cli**（见 README）。
+
+### CI 与文档
+
+- `[.github/workflows/ci.yml](.github/workflows/ci.yml)`：**Rust** `cargo build/test --features desktop` 与 `**web/`** `npm install`、`build`、`test`、`lint` 并行校验。
+- `[README.md](README.md)`：补充 Web 开发与构建说明；标明 **推荐 Web 静态产物为 `web/dist`**，Trunk + egui WASM 仍为对照路径。
+
+### 说明
+
+- 桌面 egui 行为以现有版本为准；Web 端部分能力（如关系线编辑、全部快捷键）仍在与 Rust 版对齐过程中，详见 README 与后续版本计划。
+
+---
+
+## [0.4.3] - （此前发布）
+
+- 修复多处文本框焦点丢失（稳定 `TextEdit` Id、避免渲染期改写编辑状态等）。详见 README「版本信息」历史段落。
+

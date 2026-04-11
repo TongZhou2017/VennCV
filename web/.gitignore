@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vitest
+
+# 本地环境（勿提交密钥）
+.env
+.env.local
+.env.*.local

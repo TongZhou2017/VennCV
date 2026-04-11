@@ -1,0 +1,12 @@
+# 遗留 egui + WASM 入口；在 legacy/wasm 目录执行 trunk build / trunk serve。
+# 若报错 `invalid value '1' for '--no-color'`：Shell 里常设了 NO_COLOR=1，请
+#   env -u NO_COLOR trunk build
+#   env -u NO_COLOR trunk serve
+[build]
+target = "index.html"
+dist = "dist"
+
+[serve]
+addresses = ["127.0.0.1"]
+# 8080 常被占用时可改为 8081 等
+port = 8081

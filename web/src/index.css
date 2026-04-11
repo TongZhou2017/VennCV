@@ -1,0 +1,47 @@
+@font-face {
+  font-family: "VennCV Noto SC";
+  /* `public/fonts` 在开发与构建后均挂载为站点根路径 /fonts/ */
+  src: url("/fonts/NotoSansSC-Regular.otf") format("opentype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  /* 内嵌浏览器（如 Cursor Simple Browser）里 height:100% 链易断，用视口下限撑开 */
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  font-family:
+    "VennCV Noto SC",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  font-size: 14px;
+  color: #333;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.minw0 {
+  min-width: 0;
+}

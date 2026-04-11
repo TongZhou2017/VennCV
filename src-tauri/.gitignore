@@ -1,0 +1,3 @@
+/target
+# Tauri CLI 生成的 schema / 清单（构建时可再生，勿提交）
+/gen/

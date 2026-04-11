@@ -1,0 +1,111 @@
+# 三平台 Tauri 安装包构建并上传到 GitHub Release。
+#
+# 使用方式：
+# 1) 推荐：推送符合语义化版本的 tag（与 src-tauri/tauri.conf.json 中 version 一致），例如：
+#    git tag v0.5.5 && git push origin v0.5.5
+# 2) 手动：Actions → Release Tauri → Run workflow，填写 tag（须与 tauri.conf 中 version 对齐），可选草稿 Release。
+#
+# 产物：macOS（Apple Silicon + Intel 各一份 dmg）、Windows（安装包）、Linux（deb 等，视 bundle 配置）。
+
+name: Release Tauri
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要关联的 Git 标签（例如 v0.5.5）；若尚不存在，将在此提交上创建"
+        required: true
+        type: string
+      draft:
+        description: "创建为草稿 Release（可之后在 GitHub 上再发布）"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tauri-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install Linux dependencies (Tauri / WebKitGTK)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install root + web npm dependencies
+        run: |
+          npm ci
+          npm ci --prefix web
+
+      - name: Build and upload bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # 仓库根目录含 package.json + src-tauri/；留空则自动使用 npm run tauri
+          projectPath: .
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          releaseName: VennCV ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          releaseBody: |
+            安装包见下方 Assets。请下载对应系统文件：
+
+            - **macOS**：Apple Silicon 选 `aarch64`，Intel 选 `x86_64`（均为 `.dmg`）。
+            - **Windows**：`.exe` / `.msi`（以构建产物为准）。
+            - **Linux**：`.deb` / AppImage 等（以构建产物为准）。
+
+            发布前请确认本标签与 `src-tauri/tauri.conf.json` 中的 `version` 一致。
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: false
+          releaseCommitish: ${{ github.sha }}

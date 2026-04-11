@@ -1,0 +1,13 @@
+{
+  "name": "venncv",
+  "private": true,
+  "version": "0.5.5",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
