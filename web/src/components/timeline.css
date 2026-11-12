@@ -1,0 +1,204 @@
+.timeline-page {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f7f8fa;
+  color: #222;
+}
+
+.timeline-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 16px 8px;
+}
+
+.timeline-empty {
+  margin: 24px;
+  color: #666;
+  font-size: 13px;
+}
+
+.timeline-board {
+  position: relative;
+  min-width: 100%;
+}
+
+.timeline-axis {
+  position: relative;
+  height: 28px;
+  margin: 0 8px 8px 140px;
+  border-bottom: 1px solid #d0d4da;
+}
+
+.timeline-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #667;
+  white-space: nowrap;
+}
+
+.timeline-lane {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: center;
+  min-height: 64px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+
+.timeline-lane.is-selected {
+  border-color: #1976d2;
+  box-shadow: 0 0 0 1px #1976d2 inset;
+}
+
+.timeline-lane-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.timeline-lane-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #777;
+  font-weight: 400;
+}
+
+.timeline-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.timeline-track {
+  position: relative;
+  height: 68px;
+}
+
+.timeline-track-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  max-width: 46%;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #444;
+}
+
+.timeline-preprint {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #6a1b9a;
+  color: #fff;
+  font-style: normal;
+  font-size: 10px;
+}
+
+.timeline-url {
+  display: block;
+  overflow: hidden;
+  color: #1565c0;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-line {
+  position: absolute;
+  top: 28px;
+  height: 2px;
+  background: #d5dbe3;
+}
+
+.timeline-point {
+  position: absolute;
+  top: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 64px;
+}
+
+.timeline-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #333;
+  box-sizing: border-box;
+}
+
+.timeline-point-title {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.timeline-point-detail {
+  font-size: 10px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.timeline-undated {
+  flex-shrink: 0;
+  border-top: 1px solid #e1e4e8;
+  background: #fff;
+  padding: 10px 16px 14px;
+  max-height: 32%;
+  overflow: auto;
+}
+
+.timeline-undated h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.timeline-undated-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-undated-item {
+  border: 1px solid #ddd;
+  background: #fafafa;
+  color: inherit;
+  font: inherit;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.timeline-undated-item.is-selected {
+  border-color: #1976d2;
+  background: #e3f2fd;
+}

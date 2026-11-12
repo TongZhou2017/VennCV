@@ -2,10 +2,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { resolveWorkspaceStorageKey } from "../storage/config";
 import { listUserWorkspaceJsonFiles } from "../storage/fs";
-import {
-  fullLocalStorageKeyForLogicalPath,
-  getRuntimeStorageInfo,
-} from "../storage/runtimeStorage";
+import { diskPathForLogical, getRuntimeStorageInfo } from "../storage/runtimeStorage";
 import { useAppStore } from "../store/appStore";
 
 type Props = {
@@ -113,22 +110,22 @@ export function SettingsModal({ open, onClose }: Props) {
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>工作区与存储位置</div>
             <div style={{ fontSize: 11, color: "#555", lineHeight: 1.5, marginBottom: 10 }}>
               <div>
-                <span style={{ color: "#888" }}>运行环境：</span>
+                <span style={{ color: "#888" }}>打开方式：</span>
                 {runtime.kind}
                 {runtime.origin ? `（${runtime.origin}）` : null}
               </div>
               <div style={{ marginTop: 6 }}>{runtime.isolationHint}</div>
             </div>
             <div style={{ fontSize: 11, color: "#333", marginBottom: 6 }}>
-              <span style={{ color: "#888" }}>当前逻辑路径：</span>
+              <span style={{ color: "#888" }}>当前工作区：</span>
               <code style={{ fontSize: 11, wordBreak: "break-all" }}>
                 {resolveWorkspaceStorageKey(currentUsername)}
               </code>
             </div>
             <div style={{ fontSize: 11, color: "#333", marginBottom: 12 }}>
-              <span style={{ color: "#888" }}>localStorage 键：</span>
+              <span style={{ color: "#888" }}>本机文件：</span>
               <code style={{ fontSize: 11, wordBreak: "break-all" }}>
-                {fullLocalStorageKeyForLogicalPath(resolveWorkspaceStorageKey(currentUsername))}
+                {diskPathForLogical(resolveWorkspaceStorageKey(currentUsername))}
               </code>
             </div>
 
@@ -177,10 +174,7 @@ export function SettingsModal({ open, onClose }: Props) {
             </div>
 
             <div style={{ fontSize: 11, color: "#888", margin: "10px 0 6px", lineHeight: 1.5 }}>
-              Web 版将工作区等内容写入同源{" "}
-              <code style={{ fontSize: 10 }}>localStorage</code>（键前缀{" "}
-              <code style={{ fontSize: 10 }}>venncv_fs:</code>
-              ），同站点多次访问与刷新可延续；无痕模式或清除站点数据会丢失。与桌面版磁盘数据不互通，跨环境请用工具栏「导出 JSON / 导入 JSON」。
+              工作区写在本机用户库目录中，权限仅限当前系统用户。浏览器和桌面窗口读写同一目录。换电脑时用工具栏「导出 JSON / 导入 JSON」。
             </div>
 
             <label style={{ fontSize: 12, display: "block", marginBottom: 6 }}>

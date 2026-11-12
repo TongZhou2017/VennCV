@@ -12,6 +12,7 @@ import { VisualizationSvg } from "./VisualizationSvg";
 import { measureCanvasHost } from "../viz/measureHost";
 import { getKonvaStagePixelRatio } from "../viz/stagePixelRatio";
 import { computeProjectNameLabelOffsets } from "../viz/projectLabelLayout";
+import { projectAuthorSatellites } from "../domain/authors";
 import { LS_FORCE_CANVAS_PR1, LS_SVG_VIZ } from "../storage/uiPrefs";
 
 export function VisualizationCanvas() {
@@ -30,6 +31,9 @@ export function VisualizationCanvas() {
   const multiSelectedProjectIds = useAppStore((s) => s.multiSelectedProjectIds);
   const relationDraftFromId = useAppStore((s) => s.relationDraftFromId);
   const createRelation = useAppStore((s) => s.createRelation);
+  const authorDisplay = useAppStore((s) => s.authorDisplay);
+  const selectedPersonId = useAppStore((s) => s.selectedPersonId);
+  const selectPerson = useAppStore((s) => s.selectPerson);
 
   const [wireEnd, setWireEnd] = useState<{ x: number; y: number } | null>(null);
   const [wireIndirectPreview, setWireIndirectPreview] = useState(false);
@@ -548,6 +552,43 @@ export function VisualizationCanvas() {
                     selectProject(proj.id);
                   }}
                 />
+                {projectAuthorSatellites(proj, data, authorDisplay).map((sat) => {
+                  const scale = layout.autoScale * zoom;
+                  const sr = sat.radius * scale;
+                  const fontSize = Math.max(8, sr * 0.7);
+                  const highlighted = selectedPersonId === sat.personId;
+                  return (
+                    <Group key={sat.personId} x={sat.dx * scale} y={sat.dy * scale}>
+                      <Circle
+                        radius={sr}
+                        fill={sat.color}
+                        stroke={highlighted ? "#1c2430" : "#ffffff"}
+                        strokeWidth={highlighted ? 2.5 : 1}
+                        onMouseDown={(event) => {
+                          event.cancelBubble = true;
+                        }}
+                        onClick={(event) => {
+                          event.cancelBubble = true;
+                          selectPerson(sat.personId);
+                        }}
+                        onTap={(event) => {
+                          event.cancelBubble = true;
+                          selectPerson(sat.personId);
+                        }}
+                      />
+                      <Text
+                        text={sat.shortName}
+                        fontSize={fontSize}
+                        fill="#ffffff"
+                        width={sr * 2}
+                        offsetX={sr}
+                        offsetY={fontSize / 2}
+                        align="center"
+                        listening={false}
+                      />
+                    </Group>
+                  );
+                })}
               </Group>
             );
           })}

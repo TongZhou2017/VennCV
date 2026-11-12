@@ -2,6 +2,7 @@ import yaml from "js-yaml";
 import type { UserConfig } from "../types";
 import type { WriteStorageResult } from "./fs";
 import { existsStorage, readStorage, writeStorage } from "./fs";
+import { isSafeUsername } from "./libraryPaths";
 
 const CONFIG_PATH = "config.yaml";
 
@@ -84,9 +85,34 @@ export function verifyUser(
 ): { ok: true; storagePath?: string | null } | { ok: false } {
   const config = loadUserConfig();
   for (const u of config.users) {
-    if (u.username === username && u.password_hash === password) {
+    if (u.username === username && u.password_hash !== "" && u.password_hash === password) {
       return { ok: true, storagePath: u.data_storage_path };
     }
   }
   return { ok: false };
+}
+
+export function userPasswordUnset(username: string): boolean {
+  const user = loadUserConfig().users.find((entry) => entry.username === username);
+  return !!user && user.password_hash.trim() === "";
+}
+
+/** 仅为尚未设密码的已有用户写入密码。已有密码时拒绝覆盖。 */
+export function setInitialPassword(username: string, password: string): string | null {
+  if (!password) return "密码不能为空";
+  const config = loadUserConfig();
+  const user = config.users.find((entry) => entry.username === username);
+  if (!user) return "用户不存在";
+  if (user.password_hash.trim() !== "") return "该用户已有密码";
+  user.password_hash = password;
+  const written = saveUserConfig(config);
+  if (!written.ok) return written.message;
+  return null;
+}
+
+export function validateNewUsername(username: string): string | null {
+  const name = username.trim();
+  if (!name) return "用户名为空";
+  if (!isSafeUsername(name)) return "用户名仅允许字母、数字、点、下划线与连字符";
+  return null;
 }

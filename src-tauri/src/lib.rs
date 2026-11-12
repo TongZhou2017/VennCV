@@ -1,3 +1,5 @@
+mod user_library;
+
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
@@ -108,6 +110,13 @@ pub fn run() {
             app.set_menu(menu)?;
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            user_library::user_library_snapshot,
+            user_library::user_library_choices,
+            user_library::user_library_switch,
+            user_library::user_library_forget,
+            user_library::user_library_write,
+        ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let handled = matches!(

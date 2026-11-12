@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useAppStore } from "../store/appStore";
+import { coerceAuthorDisplayMode } from "../types";
 
 type Props = {
   onImportClick: () => void;
@@ -28,6 +29,10 @@ export function Toolbar({
   const leftSidebarOpen = useAppStore((s) => s.leftSidebarOpen);
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen);
   const vizWorkspacePreview = useAppStore((s) => s.vizWorkspacePreview);
+  const workspaceView = useAppStore((s) => s.workspaceView);
+  const setWorkspaceView = useAppStore((s) => s.setWorkspaceView);
+  const authorDisplay = useAppStore((s) => s.authorDisplay);
+  const setAuthorDisplay = useAppStore((s) => s.setAuthorDisplay);
   const toggleLeftSidebar = useAppStore((s) => s.toggleLeftSidebar);
   const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar);
   const toggleVizWorkspacePreview = useAppStore((s) => s.toggleVizWorkspacePreview);
@@ -146,6 +151,43 @@ export function Toolbar({
           <circle cx="11.2" cy="9" r="4.8" fill="none" stroke="#444" strokeWidth="1.4" />
         </svg>
       </button>
+      {panelBtn(
+        "维恩图",
+        () => setWorkspaceView("venn"),
+        "维恩",
+        "维恩图视图",
+        workspaceView === "venn",
+      )}
+      {panelBtn(
+        "时间线",
+        () => setWorkspaceView("timeline"),
+        "时间线",
+        "时间线视图：预期完成日与投稿关键时间点",
+        workspaceView === "timeline",
+      )}
+      {panelBtn(
+        "合作",
+        () => setWorkspaceView("collaboration"),
+        "合作",
+        "合作关系：按共同项目把人物连成网络",
+        workspaceView === "collaboration",
+      )}
+      {workspaceView === "venn" ? (
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, marginRight: 6 }}>
+          作者
+          <select
+            aria-label="作者显示"
+            title="维恩图项目周围的人物球"
+            value={authorDisplay}
+            onChange={(event) => setAuthorDisplay(coerceAuthorDisplayMode(event.target.value))}
+            style={{ fontSize: 12, padding: "2px 4px" }}
+          >
+            <option value="off">不显示</option>
+            <option value="primary">主要</option>
+            <option value="all">全部</option>
+          </select>
+        </label>
+      ) : null}
       {textBtn("选同状态", () => selectProjectsWithSameStatus(), "同状态", "以当前选中项为基准，选中所有相同状态的项目")}
       {textBtn("选同领域", () => selectProjectsWithSameFieldSet(), "同领域", "选中与当前项「所属领域」集合完全相同的项目")}
       {textBtn("选同名", () => selectProjectsWithSameName(), "同名", "选中与当前项名称（去首尾空格）相同的项目")}

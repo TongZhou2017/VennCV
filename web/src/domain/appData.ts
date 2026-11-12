@@ -5,6 +5,8 @@ import {
   coerceProjectStatus,
   coerceRelationType,
 } from "../types";
+import { sanitizeAuthorsInPlace } from "./authors";
+import { sanitizeProjectTimes } from "./projectTime";
 
 export const DEFAULT_RELATION_COLOR: [number, number, number, number] = [0, 0, 0, 255];
 export const DEFAULT_RELATION_WIDTH = 2;
@@ -17,6 +19,9 @@ export function defaultEmptyAppData(): AppDataJson {
     relation_tags: [],
     deleted_projects: {},
     deleted_relation_stash: [],
+    labs: {},
+    people: {},
+    authorships: [],
   };
 }
 
@@ -30,6 +35,7 @@ function normalizeDeletedProjects(
   }
   sanitizeProjectCompletion(out);
   sanitizeProjectStatuses(out);
+  sanitizeProjectTimes(out);
   return out;
 }
 
@@ -65,10 +71,13 @@ function sanitizeRelationTypes(data: AppDataJson): void {
 export function sanitizeAppDataInPlace(d: AppDataJson): void {
   sanitizeProjectCompletion(d.projects);
   sanitizeProjectStatuses(d.projects);
+  sanitizeProjectTimes(d.projects);
   sanitizeRelationTypes(d);
+  sanitizeAuthorsInPlace(d);
   if (d.deleted_projects && typeof d.deleted_projects === "object") {
     sanitizeProjectCompletion(d.deleted_projects);
     sanitizeProjectStatuses(d.deleted_projects);
+    sanitizeProjectTimes(d.deleted_projects);
   }
 }
 
@@ -83,7 +92,9 @@ export function cloneAppData(d: AppDataJson): AppDataJson {
   }
   sanitizeProjectCompletion(copy.projects);
   sanitizeProjectStatuses(copy.projects);
+  sanitizeProjectTimes(copy.projects);
   sanitizeRelationTypes(copy);
+  sanitizeAuthorsInPlace(copy);
   return copy;
 }
 
@@ -99,6 +110,7 @@ export function normalizeAppData(raw: unknown): AppDataJson {
   const projects = { ...(j.projects ?? {}) };
   sanitizeProjectCompletion(projects);
   sanitizeProjectStatuses(projects);
+  sanitizeProjectTimes(projects);
   const deleted_projects = normalizeDeletedProjects(
     projects,
     j.deleted_projects as Record<string, Project> | undefined,
@@ -110,14 +122,19 @@ export function normalizeAppData(raw: unknown): AppDataJson {
     width: r.width ?? DEFAULT_RELATION_WIDTH,
     relation_type: coerceRelationType(r.relation_type),
   }));
-  return {
+  const data: AppDataJson = {
     fields: j.fields ?? {},
     projects,
     relations,
     relation_tags: j.relation_tags ?? [],
     deleted_projects,
     deleted_relation_stash,
+    labs: j.labs ?? {},
+    people: j.people ?? {},
+    authorships: j.authorships ?? [],
   };
+  sanitizeAuthorsInPlace(data);
+  return data;
 }
 
 /** 与 Rust `merge_import_json` 一致：合并导入，关系按 (from,to) 去重 */
@@ -150,6 +167,15 @@ export function mergeImportJson(current: AppDataJson, content: string): AppDataJ
     ...(next.deleted_relation_stash ?? []),
     ...(imported.deleted_relation_stash ?? []),
   ];
+  next.labs = { ...next.labs, ...imported.labs };
+  next.people = { ...next.people, ...imported.people };
+  for (const link of imported.authorships) {
+    const dup = next.authorships.some(
+      (item) => item.project_id === link.project_id && item.person_id === link.person_id,
+    );
+    if (!dup) next.authorships.push(link);
+  }
+  sanitizeAuthorsInPlace(next);
   return next;
 }
 
@@ -181,5 +207,8 @@ export function appDataToExportJson(data: AppDataJson): string {
   if (data.deleted_relation_stash && data.deleted_relation_stash.length > 0) {
     payload.deleted_relation_stash = data.deleted_relation_stash;
   }
+  if (Object.keys(data.labs).length > 0) payload.labs = data.labs;
+  if (Object.keys(data.people).length > 0) payload.people = data.people;
+  if (data.authorships.length > 0) payload.authorships = data.authorships;
   return JSON.stringify(payload, null, 2);
 }

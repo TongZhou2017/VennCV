@@ -2207,6 +2207,10 @@ impl VennCVApp {
             position: (400.0, 400.0),
             radius: 20.0,
             completion_percentage: 0.0,
+            expected_completion_date: None,
+            expected_journal: None,
+            submission_milestones: Vec::new(),
+            journal_submissions: Vec::new(),
         };
         // 先调整领域布局
         self.adjust_field_layout();

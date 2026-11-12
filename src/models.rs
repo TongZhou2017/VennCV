@@ -43,6 +43,43 @@ pub struct ResearchField {
     pub radius: f32,           // 半径
 }
 
+/// 投稿关键时间点类型。`Custom` 的名称写在 `SubmissionMilestone.label`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SubmissionMilestoneKind {
+    SubmissionStart,
+    Revision,
+    Accepted,
+    Published,
+    Rejected,
+    Custom,
+}
+
+/// 投稿关键时间点。日期为 `YYYY-MM-DD`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubmissionMilestone {
+    pub id: String,
+    pub kind: SubmissionMilestoneKind,
+    #[serde(default)]
+    pub label: String,
+    pub date: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// 一次期刊投递或一条预印本。`url` 是对外展示版本。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JournalSubmission {
+    pub id: String,
+    #[serde(default)]
+    pub venue: String,
+    #[serde(default)]
+    pub is_preprint: bool,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub milestones: Vec<SubmissionMilestone>,
+}
+
 /// 项目（小圈）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
@@ -53,7 +90,125 @@ pub struct Project {
     pub field_ids: Vec<String>,  // 所属的研究领域
     pub position: (f32, f32),    // 在可视化中的位置
     pub radius: f32,             // 半径
-    pub completion_percentage: f32,  // 完成度百分比 (0.0 - 100.0)
+    pub completion_percentage: f32,  // 完成度百分比 (0.0 - 100.0)。100 表示开始投稿。
+    /// 预期完成日 `YYYY-MM-DD`。旧 JSON 缺省为无。
+    #[serde(default)]
+    pub expected_completion_date: Option<String>,
+    /// 未投稿项目计划投递的期刊。旧 JSON 缺省为无。
+    #[serde(default)]
+    pub expected_journal: Option<String>,
+    /// 投稿关键时间点。旧 JSON 缺省为空。由 `journal_submissions` 汇总。
+    #[serde(default)]
+    pub submission_milestones: Vec<SubmissionMilestone>,
+    /// 按期刊或预印本分开的投递。旧 JSON 缺省为空。
+    #[serde(default)]
+    pub journal_submissions: Vec<JournalSubmission>,
+}
+
+/// 作者角色。旧数据缺省为其他。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AuthorRole {
+    First,
+    Corresponding,
+    Coauthor,
+    #[default]
+    Other,
+}
+
+/// CRediT 贡献角色。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreditRole {
+    Conceptualization,
+    DataCuration,
+    FormalAnalysis,
+    FundingAcquisition,
+    Investigation,
+    Methodology,
+    ProjectAdministration,
+    Resources,
+    Software,
+    Supervision,
+    Validation,
+    Visualization,
+    WritingOriginalDraft,
+    WritingReviewEditing,
+}
+
+fn default_lab_color() -> String {
+    "#5c6bc0".to_string()
+}
+
+/// 实验室
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Lab {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default = "default_lab_color")]
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PersonDe {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    lab_id: Option<String>,
+    #[serde(default)]
+    lab_ids: Vec<String>,
+    #[serde(default)]
+    family_name: String,
+    #[serde(default)]
+    given_name: String,
+}
+
+/// 人物。不是登录账号。`lab_id` 是旧字段，读入后并入 `lab_ids`。
+#[derive(Debug, Clone, Serialize)]
+#[serde(from = "PersonDe")]
+pub struct Person {
+    pub id: String,
+    pub name: String,
+    pub lab_ids: Vec<String>,
+    pub family_name: String,
+    pub given_name: String,
+}
+
+impl From<PersonDe> for Person {
+    fn from(raw: PersonDe) -> Self {
+        let mut lab_ids = raw.lab_ids;
+        if let Some(id) = raw.lab_id {
+            if !id.is_empty() && !lab_ids.iter().any(|item| item == &id) {
+                lab_ids.insert(0, id);
+            }
+        }
+        Self {
+            id: raw.id,
+            name: raw.name,
+            lab_ids,
+            family_name: raw.family_name,
+            given_name: raw.given_name,
+        }
+    }
+}
+
+/// 人物在项目上的身份。`role` 只用于读旧数据。`responsibility` 留给以后的任务系统。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectAuthorship {
+    pub project_id: String,
+    pub person_id: String,
+    #[serde(default)]
+    pub role: AuthorRole,
+    #[serde(default)]
+    pub position: u32,
+    #[serde(default)]
+    pub corresponding: bool,
+    #[serde(default)]
+    pub credit_roles: Vec<CreditRole>,
+    #[serde(default)]
+    pub primary: bool,
+    #[serde(default)]
+    pub responsibility: String,
 }
 
 /// 项目关系（箭头）
@@ -185,6 +340,12 @@ pub struct AppData {
     pub relations: Vec<ProjectRelation>,
     #[serde(default)]
     pub relation_tags: Vec<String>,  // 关系标签列表（全局标签库）
+    #[serde(default)]
+    pub labs: IndexMap<String, Lab>,
+    #[serde(default)]
+    pub people: IndexMap<String, Person>,
+    #[serde(default)]
+    pub authorships: Vec<ProjectAuthorship>,
 }
 
 impl Default for AppData {
@@ -228,6 +389,10 @@ impl Default for AppData {
             position: (550.0, 450.0),
             radius: 20.0,
             completion_percentage: 100.0,
+            expected_completion_date: None,
+            expected_journal: None,
+            submission_milestones: Vec::new(),
+            journal_submissions: Vec::new(),
         });
 
         projects.insert("project_2".to_string(), Project {
@@ -239,6 +404,10 @@ impl Default for AppData {
             position: (250.0, 450.0),
             radius: 20.0,
             completion_percentage: 100.0,
+            expected_completion_date: None,
+            expected_journal: None,
+            submission_milestones: Vec::new(),
+            journal_submissions: Vec::new(),
         });
 
         // 添加关系
@@ -256,6 +425,9 @@ impl Default for AppData {
             projects,
             relations,
             relation_tags: Vec::new(),
+            labs: IndexMap::new(),
+            people: IndexMap::new(),
+            authorships: Vec::new(),
         }
     }
 }
@@ -269,6 +441,9 @@ impl AppData {
             projects: IndexMap::new(),
             relations: Vec::new(),
             relation_tags: Vec::new(),
+            labs: IndexMap::new(),
+            people: IndexMap::new(),
+            authorships: Vec::new(),
         }
     }
 }
@@ -304,11 +479,34 @@ mod tests {
             position: (10.0, 20.0),
             radius: 15.0,
             completion_percentage: 50.0,
+            expected_completion_date: None,
+            expected_journal: None,
+            submission_milestones: Vec::new(),
+            journal_submissions: Vec::new(),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, p.id);
         assert!(matches!(back.status, ProjectStatus::Submitted));
+        assert!(back.expected_completion_date.is_none());
+        assert!(back.submission_milestones.is_empty());
+    }
+
+    #[test]
+    fn project_without_timeline_fields_deserializes() {
+        let json = r#"{"id":"p","name":"n","description":"","status":"ToBeStarted","field_ids":[],"position":[0.0,0.0],"radius":10.0,"completion_percentage":0.0}"#;
+        let p: Project = serde_json::from_str(json).unwrap();
+        assert!(p.expected_completion_date.is_none());
+        assert!(p.submission_milestones.is_empty());
+    }
+
+    #[test]
+    fn appdata_without_authors_deserializes() {
+        let json = r#"{"fields":{},"projects":{},"relations":[]}"#;
+        let data: AppData = serde_json::from_str(json).unwrap();
+        assert!(data.labs.is_empty());
+        assert!(data.people.is_empty());
+        assert!(data.authorships.is_empty());
     }
 
     #[test]

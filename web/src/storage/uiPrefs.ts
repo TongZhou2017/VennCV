@@ -1,8 +1,9 @@
 import { isElectronRenderer } from "../viz/stagePixelRatio";
-import type { AppSettings } from "../types";
+import { coerceAuthorDisplayMode, type AppSettings, type AuthorDisplayMode } from "../types";
 
 export const LS_SVG_VIZ = "venncv_svg_viz";
 export const LS_FORCE_CANVAS_PR1 = "venncv_force_canvas_pr1";
+export const LS_AUTHOR_DISPLAY = "venncv_author_display";
 
 /** 与 localStorage 同步的可视化相关设置（不写 workspace.json） */
 export type VisualizationRenderPrefs = Pick<
@@ -42,6 +43,22 @@ export function writeVisualizationRenderPrefsToStorage(prefs: VisualizationRende
       LS_FORCE_CANVAS_PR1,
       prefs.visualization_force_konva_pixel_ratio_1 ? "1" : "0",
     );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readAuthorDisplayFromStorage(): AuthorDisplayMode {
+  try {
+    return coerceAuthorDisplayMode(globalThis.localStorage?.getItem(LS_AUTHOR_DISPLAY));
+  } catch {
+    return "off";
+  }
+}
+
+export function writeAuthorDisplayToStorage(mode: AuthorDisplayMode): void {
+  try {
+    globalThis.localStorage?.setItem(LS_AUTHOR_DISPLAY, mode);
   } catch {
     /* ignore */
   }

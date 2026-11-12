@@ -9,6 +9,106 @@ export type ProjectStatus =
 
 export type RelationType = "Direct" | "Indirect";
 
+/** 维恩图上人物球的显示范围。只存在本地界面设置里，不写入工作区。 */
+export type AuthorDisplayMode = "off" | "primary" | "all";
+
+/** 读入旧数据时用。保存后不再写回。 */
+export type AuthorRole = "First" | "Corresponding" | "Coauthor" | "Other";
+
+/** CRediT 贡献角色。一个人在同一项目上可以有多项。 */
+export type CreditRole =
+  | "Conceptualization"
+  | "DataCuration"
+  | "FormalAnalysis"
+  | "FundingAcquisition"
+  | "Investigation"
+  | "Methodology"
+  | "ProjectAdministration"
+  | "Resources"
+  | "Software"
+  | "Supervision"
+  | "Validation"
+  | "Visualization"
+  | "WritingOriginalDraft"
+  | "WritingReviewEditing";
+
+/** 导出作者贡献文本时的姓名写法。 */
+export type AuthorNameStyle = "full" | "familyInitials" | "initialsFamily";
+
+export interface Lab {
+  id: string;
+  name: string;
+  /** `#rrggbb` */
+  color: string;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  /** 可同时属于多个实验室 */
+  lab_ids: string[];
+  /** 缩写用。空则从姓名推断：空格前为姓，汉字则首字为姓 */
+  family_name: string;
+  given_name: string;
+}
+
+/** 人物在某个项目上的身份。以后的任务用 project_id + person_id 挂钩。 */
+export interface ProjectAuthorship {
+  project_id: string;
+  person_id: string;
+  /** 作者位次，从 1 起 */
+  position: number;
+  corresponding: boolean;
+  credit_roles: CreditRole[];
+  /** 为 true 时，维恩图「只显示主要作者」会贴出这个人 */
+  primary: boolean;
+  responsibility: string;
+}
+
+export function coerceAuthorRole(raw: unknown): AuthorRole {
+  if (raw === "First") return "First";
+  if (raw === "Corresponding") return "Corresponding";
+  if (raw === "Coauthor") return "Coauthor";
+  if (raw === "Other") return "Other";
+  return "Other";
+}
+
+export function coerceAuthorDisplayMode(raw: unknown): AuthorDisplayMode {
+  if (raw === "primary") return "primary";
+  if (raw === "all") return "all";
+  return "off";
+}
+
+/** 投稿关键时间点。`Custom` 的名称写在 `label`。 */
+export type SubmissionMilestoneKind =
+  | "SubmissionStart"
+  | "Revision"
+  | "Accepted"
+  | "Published"
+  | "Rejected"
+  | "Custom";
+
+export interface SubmissionMilestone {
+  id: string;
+  kind: SubmissionMilestoneKind;
+  /** `Custom` 时的自拟名称；预设类型可留空 */
+  label: string;
+  /** YYYY-MM-DD */
+  date: string;
+  note: string;
+}
+
+/** 一次期刊投递，或一条预印本。预印本和最终发表都可以绑定对外展示版本的网址。 */
+export interface JournalSubmission {
+  id: string;
+  /** 期刊名，或预印本平台名 */
+  venue: string;
+  is_preprint: boolean;
+  /** 对外展示版本 URL */
+  url: string;
+  milestones: SubmissionMilestone[];
+}
+
 export interface ResearchField {
   id: string;
   name: string;
@@ -26,6 +126,25 @@ export interface Project {
   position: [number, number];
   radius: number;
   completion_percentage: number;
+  /**
+   * 预期完成日 `YYYY-MM-DD`。完成度 100% 表示开始投稿。
+   * 旧工作区缺省为空。
+   */
+  expected_completion_date?: string | null;
+  /**
+   * 未投稿项目计划投递的期刊。旧工作区缺省为空。
+   */
+  expected_journal?: string | null;
+  /**
+   * 投稿关键时间点，按日期排序。供「投稿中 / 已发表」使用。
+   * 旧工作区缺省为空列表。
+   */
+  submission_milestones?: SubmissionMilestone[];
+  /**
+   * 按期刊或预印本分开的投递记录。
+   * 旧数据只有 `submission_milestones` 时，读入后归入一条未命名期刊记录。
+   */
+  journal_submissions?: JournalSubmission[];
   /** 为 true 时画布不绘制该项目圆与名称；侧栏仍列出，便于批量管理 */
   canvas_hidden?: boolean;
 }
@@ -45,6 +164,12 @@ export interface AppDataJson {
   projects: Record<string, Project>;
   relations: ProjectRelation[];
   relation_tags: string[];
+  /** 实验室。旧工作区缺省为空。 */
+  labs: Record<string, Lab>;
+  /** 人物。旧工作区缺省为空。 */
+  people: Record<string, Person>;
+  /** 人物与项目的关联。回收站项目可以保留关联，但不进入合作网络。 */
+  authorships: ProjectAuthorship[];
   /** 回收站：已移出主列表的项目，可复原；键与 projects 不重复 */
   deleted_projects?: Record<string, Project>;
   /** 移入回收站时暂存的、涉及被删项目的连线，复原项目时写回 */

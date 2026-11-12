@@ -29,7 +29,9 @@ import {
 import type {
   AppDataJson,
   AppSettings,
+  AuthorDisplayMode,
   Project,
+  ProjectAuthorship,
   ProjectRelation,
   ResearchField,
   UserConfig,
@@ -41,11 +43,19 @@ import {
   normalizeNewWorkspaceFilename,
   resolveWorkspaceStorageKey,
   saveUserConfig,
+  setInitialPassword,
   setUserLastEditedFile,
+  userPasswordUnset,
+  validateNewUsername,
   verifyUser,
 } from "../storage/config";
 import type { WriteStorageResult } from "../storage/fs";
-import { existsStorage, readStorage, writeStorage } from "../storage/fs";
+import { existsStorage, readStorage, setStorageErrorSink, writeStorage } from "../storage/fs";
+import {
+  clearRememberLogin,
+  readRememberUntil,
+  saveRememberLogin,
+} from "../storage/rememberLogin";
 import {
   appendSnapshot,
   deleteBranch,
@@ -57,9 +67,12 @@ import {
   switchBranch,
 } from "../storage/versionStore";
 import {
+  readAuthorDisplayFromStorage,
   readVisualizationRenderPrefsFromStorage,
+  writeAuthorDisplayToStorage,
   writeVisualizationRenderPrefsToStorage,
 } from "../storage/uiPrefs";
+import { nextCatalogId, nextLabColor } from "../domain/authors";
 
 let bannerNoticeToken = 0;
 
@@ -130,6 +143,8 @@ function pushHistorySlice(
   return { history: trimmed, index: trimmed.length - 1 };
 }
 
+export type WorkspaceView = "venn" | "timeline" | "collaboration";
+
 export interface AppState {
   isLoggedIn: boolean;
   currentUsername: string | null;
@@ -137,6 +152,8 @@ export interface AppState {
   loginPassword: string;
   loginError: string;
   availableUsers: string[];
+  /** 磁盘上已有数据、但 config 里还没有密码的用户 */
+  usersWithoutPassword: string[];
 
   data: AppDataJson;
   fieldOrder: string[];
@@ -163,10 +180,19 @@ export interface AppState {
   rightSidebarOpen: boolean;
   /** 工作区预览：可视化以绝对定位铺满主内容区（非仅 flex 收栏） */
   vizWorkspacePreview: boolean;
+  /** 主内容区：维恩图、时间线或合作网络 */
+  workspaceView: WorkspaceView;
+  /** 维恩图人物球：不显示、只显示主要作者、显示全部。不写入工作区。 */
+  authorDisplay: AuthorDisplayMode;
+  setAuthorDisplay: (mode: AuthorDisplayMode) => void;
+  /** 从维恩图或合作网络点中的人物 */
+  selectedPersonId: string | null;
+  selectPerson: (id: string | null) => void;
   toggleLeftSidebar: () => void;
   toggleRightSidebar: () => void;
   setVizWorkspacePreview: (v: boolean) => void;
   toggleVizWorkspacePreview: () => void;
+  setWorkspaceView: (view: WorkspaceView) => void;
 
   exportModalBody: string | null;
   exportSuggestedName: string;
@@ -181,7 +207,12 @@ export interface AppState {
   /** 初始化登录页用户列表 */
   initAuth: () => void;
   setLoginUsername: (v: string) => void;
+  selectLoginUser: (username: string) => void;
   setLoginPassword: (v: string) => void;
+  /** 勾选后，本次密码登录在 3 天内可免密码进入 */
+  loginRemember: boolean;
+  setLoginRemember: (value: boolean) => void;
+  loginWithRememberedSession: (username: string) => void;
   submitLogin: () => void;
   logout: () => void;
 
@@ -252,6 +283,23 @@ export interface AppState {
   removeRelationAt: (index: number) => void;
   updateRelationAt: (index: number, patch: Partial<ProjectRelation>) => void;
   ensureGlobalRelationTag: (tag: string) => void;
+
+  addLab: (name: string) => void;
+  updateLab: (id: string, patch: { name?: string; color?: string }) => void;
+  removeLab: (id: string) => void;
+  addPerson: (name: string, labIds: string[]) => string | null;
+  updatePerson: (
+    id: string,
+    patch: { name?: string; lab_ids?: string[]; family_name?: string; given_name?: string },
+  ) => void;
+  removePerson: (id: string) => void;
+  addProjectAuthor: (projectId: string, personId: string) => void;
+  updateProjectAuthor: (
+    projectId: string,
+    personId: string,
+    patch: Partial<Pick<ProjectAuthorship, "position" | "corresponding" | "credit_roles" | "primary" | "responsibility">>,
+  ) => void;
+  removeProjectAuthor: (projectId: string, personId: string) => void;
 }
 
 function newProjectId(projects: Record<string, Project>): string {
@@ -269,7 +317,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   loginUsername: "",
   loginPassword: "",
   loginError: "",
+  loginRemember: true,
   availableUsers: [],
+  usersWithoutPassword: [],
 
   data: defaultEmptyAppData(),
   fieldOrder: [],
@@ -290,11 +340,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   leftSidebarOpen: true,
   rightSidebarOpen: true,
   vizWorkspacePreview: false,
+  workspaceView: "venn",
+  authorDisplay: readAuthorDisplayFromStorage(),
+  selectedPersonId: null,
 
   toggleLeftSidebar: () => set((s) => ({ leftSidebarOpen: !s.leftSidebarOpen })),
   toggleRightSidebar: () => set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
   setVizWorkspacePreview: (v) => set({ vizWorkspacePreview: v }),
   toggleVizWorkspacePreview: () => set((s) => ({ vizWorkspacePreview: !s.vizWorkspacePreview })),
+  setWorkspaceView: (view) =>
+    set({
+      workspaceView: view,
+      vizWorkspacePreview: view === "venn" ? get().vizWorkspacePreview : false,
+    }),
+  setAuthorDisplay: (mode) => {
+    writeAuthorDisplayToStorage(mode);
+    set({ authorDisplay: mode });
+  },
+  selectPerson: (id) => {
+    if (id && !get().data.people[id]) return;
+    set({ selectedPersonId: id });
+  },
 
   exportModalBody: null,
   exportSuggestedName: "venncv_export.json",
@@ -314,24 +380,69 @@ export const useAppStore = create<AppState>((set, get) => ({
   initAuth: () => {
     const cfg = loadUserConfig();
     const users = cfg.users.map((u) => u.username).sort();
-    set({ availableUsers: users });
+    const usersWithoutPassword = cfg.users
+      .filter((user) => user.password_hash.trim() === "")
+      .map((user) => user.username);
+    set({ availableUsers: users, usersWithoutPassword });
   },
 
   setLoginUsername: (v) => set({ loginUsername: v }),
+  selectLoginUser: (username) => set({ loginUsername: username, loginPassword: "", loginError: "" }),
   setLoginPassword: (v) => set({ loginPassword: v }),
+  setLoginRemember: (value) => set({ loginRemember: value }),
+
+  loginWithRememberedSession: (username) => {
+    const expiresAt = readRememberUntil(username);
+    if (!expiresAt) {
+      set({
+        loginUsername: username,
+        loginPassword: "",
+        loginError: "免密码登录已过期，请输入密码",
+      });
+      return;
+    }
+    if (!loadUserConfig().users.some((user) => user.username === username)) {
+      set({ loginError: "用户不存在" });
+      return;
+    }
+    set({
+      isLoggedIn: true,
+      currentUsername: username,
+      loginUsername: username,
+      loginError: "",
+      loginPassword: "",
+    });
+    get().loadWorkspaceForUser(username);
+  },
 
   submitLogin: () => {
     const { loginUsername, loginPassword } = get();
-    if (!loginUsername.trim() || !loginPassword) {
+    const username = loginUsername.trim();
+    if (!username || !loginPassword) {
       set({ loginError: "用户名和密码不能为空" });
       return;
     }
-    const r = verifyUser(loginUsername.trim(), loginPassword);
+    if (userPasswordUnset(username)) {
+      if (loginPassword.length < 4) {
+        set({ loginError: "请为这个用户设置至少 4 位密码" });
+        return;
+      }
+      const claimed = setInitialPassword(username, loginPassword);
+      if (claimed) {
+        set({ loginError: claimed });
+        return;
+      }
+      set({
+        usersWithoutPassword: get().usersWithoutPassword.filter((name) => name !== username),
+      });
+    }
+    const r = verifyUser(username, loginPassword);
     if (!r.ok) {
       set({ loginError: "用户名或密码错误" });
       return;
     }
-    const username = loginUsername.trim();
+    const kept = get().loginRemember ? saveRememberLogin(username) : clearRememberLogin(username);
+    if (!kept.ok) set({ storageError: kept.message });
     set({
       isLoggedIn: true,
       currentUsername: username,
@@ -342,6 +453,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   logout: () => {
+    const username = get().currentUsername;
+    if (username) clearRememberLogin(username);
     bannerNoticeToken += 1;
     set({
       isLoggedIn: false,
@@ -350,6 +463,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       leftSidebarOpen: true,
       rightSidebarOpen: true,
       vizWorkspacePreview: false,
+      workspaceView: "venn",
+      selectedPersonId: null,
       selectedProjectId: null,
       projectEditBuffer: null,
       multiSelectedProjectIds: [],
@@ -1080,6 +1195,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       position: [400, 400],
       radius: 20,
       completion_percentage: 0,
+      expected_completion_date: null,
+      expected_journal: null,
+      submission_milestones: [],
+      journal_submissions: [],
     };
     next.projects[id] = p;
     get().commitData(next);
@@ -1178,19 +1297,144 @@ export const useAppStore = create<AppState>((set, get) => ({
     next.relation_tags = [...next.relation_tags, t];
     get().commitData(next);
   },
+
+  addLab: (name) => {
+    const trimmed = name.trim().slice(0, 80);
+    if (!trimmed) return;
+    const next = cloneAppData(get().data);
+    const id = nextCatalogId("lab", next.labs);
+    next.labs[id] = { id, name: trimmed, color: nextLabColor(next.labs) };
+    get().commitData(next);
+  },
+
+  updateLab: (id, patch) => {
+    const next = cloneAppData(get().data);
+    const lab = next.labs[id];
+    if (!lab) return;
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim().slice(0, 80);
+      if (!trimmed) return;
+      lab.name = trimmed;
+    }
+    if (patch.color !== undefined) lab.color = patch.color;
+    get().commitData(next);
+  },
+
+  removeLab: (id) => {
+    const next = cloneAppData(get().data);
+    if (!next.labs[id]) return;
+    delete next.labs[id];
+    for (const person of Object.values(next.people)) {
+      person.lab_ids = person.lab_ids.filter((labId) => labId !== id);
+    }
+    get().commitData(next);
+  },
+
+  addPerson: (name, labIds) => {
+    const trimmed = name.trim().slice(0, 80);
+    if (!trimmed) return null;
+    const next = cloneAppData(get().data);
+    const id = nextCatalogId("person", next.people);
+    next.people[id] = {
+      id,
+      name: trimmed,
+      lab_ids: labIds.filter((labId, index) => next.labs[labId] && labIds.indexOf(labId) === index),
+      family_name: "",
+      given_name: "",
+    };
+    get().commitData(next);
+    return id;
+  },
+
+  updatePerson: (id, patch) => {
+    const next = cloneAppData(get().data);
+    const person = next.people[id];
+    if (!person) return;
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim().slice(0, 80);
+      if (!trimmed) return;
+      person.name = trimmed;
+    }
+    if (patch.family_name !== undefined) person.family_name = patch.family_name.trim().slice(0, 40);
+    if (patch.given_name !== undefined) person.given_name = patch.given_name.trim().slice(0, 40);
+    if (patch.lab_ids !== undefined) {
+      person.lab_ids = patch.lab_ids.filter((labId, index) => next.labs[labId] && patch.lab_ids?.indexOf(labId) === index);
+    }
+    get().commitData(next);
+  },
+
+  removePerson: (id) => {
+    const next = cloneAppData(get().data);
+    if (!next.people[id]) return;
+    delete next.people[id];
+    next.authorships = next.authorships.filter((link) => link.person_id !== id);
+    get().commitData(next);
+    if (get().selectedPersonId === id) set({ selectedPersonId: null });
+  },
+
+  addProjectAuthor: (projectId, personId) => {
+    const next = cloneAppData(get().data);
+    if (!next.projects[projectId] || !next.people[personId]) return;
+    if (next.authorships.some((link) => link.project_id === projectId && link.person_id === personId)) return;
+    const position =
+      next.authorships
+        .filter((link) => link.project_id === projectId)
+        .reduce((max, link) => Math.max(max, link.position), 0) + 1;
+    const link: ProjectAuthorship = {
+      project_id: projectId,
+      person_id: personId,
+      position,
+      corresponding: false,
+      credit_roles: [],
+      primary: false,
+      responsibility: "",
+    };
+    next.authorships.push(link);
+    get().commitData(next);
+  },
+
+  updateProjectAuthor: (projectId, personId, patch) => {
+    const next = cloneAppData(get().data);
+    const link = next.authorships.find((item) => item.project_id === projectId && item.person_id === personId);
+    if (!link) return;
+    if (patch.position !== undefined) {
+      const position = Math.round(patch.position);
+      if (Number.isFinite(position)) link.position = Math.max(1, Math.min(999, position));
+    }
+    if (patch.corresponding !== undefined) link.corresponding = patch.corresponding;
+    if (patch.credit_roles !== undefined) link.credit_roles = patch.credit_roles;
+    if (patch.primary !== undefined) link.primary = patch.primary;
+    if (patch.responsibility !== undefined) link.responsibility = patch.responsibility.trim().slice(0, 200);
+    get().commitData(next);
+  },
+
+  removeProjectAuthor: (projectId, personId) => {
+    const next = cloneAppData(get().data);
+    next.authorships = next.authorships.filter(
+      (link) => !(link.project_id === projectId && link.person_id === personId),
+    );
+    get().commitData(next);
+  },
 }));
+
+setStorageErrorSink((message) => {
+  useAppStore.setState({ storageError: message });
+});
 
 /** 创建用户（写入 config.yaml） */
 export function createUserInConfig(username: string, password: string): string | null {
-  if (!username.trim()) return "用户名为空";
+  const nameError = validateNewUsername(username);
+  if (nameError) return nameError;
+  if (!password) return "密码不能为空";
+  const name = username.trim();
   const cfg = loadUserConfig();
-  if (cfg.users.some((u) => u.username === username.trim())) {
+  if (cfg.users.some((u) => u.username === name)) {
     return "用户已存在";
   }
   cfg.users.push({
-    username: username.trim(),
+    username: name,
     password_hash: password,
-    data_storage_path: `users/${username.trim()}`,
+    data_storage_path: `users/${name}`,
     last_edited_file: null,
   });
   const wr = saveUserConfig(cfg);

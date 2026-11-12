@@ -1,6 +1,6 @@
 [package]
 name = "venncv-tauri"
-version = "0.5.5"
+version = "0.7.3"
 description = "VennCV desktop (Tauri + WebView)"
 authors = ["VennCV"]
 edition = "2021"

@@ -13,6 +13,7 @@ import {
   screenToData,
   type VizLayout,
 } from "../viz/layout";
+import { projectAuthorSatellites } from "../domain/authors";
 
 function clientToSvgCoords(
   svg: SVGSVGElement,
@@ -62,6 +63,9 @@ export function VisualizationSvg({
   setWireIndirectPreview,
   onBeginPan,
 }: Props) {
+  const authorDisplay = useAppStore((s) => s.authorDisplay);
+  const selectedPersonId = useAppStore((s) => s.selectedPersonId);
+  const selectPerson = useAppStore((s) => s.selectPerson);
   const projectOnCanvas = (p: { canvas_hidden?: boolean }) => p.canvas_hidden !== true;
   const bg = rgbaToCss(settings.visualization_bg_color);
   const layoutRef = useRef(layout);
@@ -432,6 +436,39 @@ export function VisualizationSvg({
                 useAppStore.getState().selectProject(proj.id);
               }}
               />
+              {projectAuthorSatellites(proj, data, authorDisplay).map((sat) => {
+                const scale = layout.autoScale * zoom;
+                const sr = sat.radius * scale;
+                const fontSize = Math.max(8, sr * 0.55);
+                const highlighted = selectedPersonId === sat.personId;
+                return (
+                  <g key={sat.personId} transform={`translate(${cx + sat.dx * scale} ${cy + sat.dy * scale})`}>
+                    <circle
+                      r={sr}
+                      fill={sat.color}
+                      stroke={highlighted ? "#1c2430" : "#ffffff"}
+                      strokeWidth={highlighted ? 2.5 : 1}
+                      style={{ cursor: "pointer" }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectPerson(sat.personId);
+                      }}
+                    >
+                      <title>{sat.name}</title>
+                    </circle>
+                    <text
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#ffffff"
+                      fontSize={fontSize}
+                      pointerEvents="none"
+                    >
+                      {sat.shortName}
+                    </text>
+                  </g>
+                );
+              })}
             </g>
           );
         })}

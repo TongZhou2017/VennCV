@@ -1,0 +1,135 @@
+.date-field {
+  position: relative;
+  margin-top: 4px;
+}
+
+.date-field-row {
+  display: flex;
+  gap: 6px;
+}
+
+.date-field-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #ddd4c8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.date-field-input:focus {
+  outline: 2px solid rgba(15, 110, 110, 0.35);
+  border-color: #0f6e6e;
+}
+
+.date-field-open {
+  flex: none;
+  padding: 0 10px;
+  border: 1px solid #ddd4c8;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f6e6e;
+}
+
+.date-field-open[aria-expanded="true"] {
+  background: #e7f3f3;
+  border-color: #0f6e6e;
+}
+
+.date-field-hint,
+.date-field-error {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.date-field-hint {
+  color: #8a8176;
+}
+
+.date-field-error {
+  color: #a32020;
+}
+
+.date-popover {
+  position: fixed;
+  z-index: 40;
+  width: 252px;
+  padding: 8px;
+  border: 1px solid #e4ddd3;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(60, 42, 24, 0.16);
+}
+
+.date-popover-bar {
+  display: grid;
+  grid-template-columns: 28px 1fr 72px 28px;
+  gap: 4px;
+  align-items: center;
+}
+
+.date-popover-bar button,
+.date-popover-foot button {
+  height: 28px;
+  border: 1px solid #eee6dc;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.date-popover-bar select {
+  height: 28px;
+  border: 1px solid #eee6dc;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.date-popover-week,
+.date-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-top: 6px;
+}
+
+.date-popover-week span,
+.date-day {
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+
+.date-popover-week span {
+  color: #8a8176;
+}
+
+.date-day {
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.date-day.is-outside {
+  color: #b7aea3;
+}
+
+.date-day.is-today {
+  box-shadow: inset 0 0 0 1px #0f6e6e;
+}
+
+.date-day.is-selected {
+  background: #0f6e6e;
+  color: #fff;
+}
+
+.date-popover-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.date-popover-foot button {
+  flex: 1;
+  color: #0f6e6e;
+}

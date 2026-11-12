@@ -2,7 +2,7 @@
 #
 # 使用方式：
 # 1) 推荐：推送符合语义化版本的 tag（与 src-tauri/tauri.conf.json 中 version 一致），例如：
-#    git tag v0.5.5 && git push origin v0.5.5
+#    git tag v0.7.3 && git push origin v0.7.3
 # 2) 手动：Actions → Release Tauri → Run workflow，填写 tag（须与 tauri.conf 中 version 对齐），可选草稿 Release。
 #
 # 产物：macOS（Apple Silicon + Intel 各一份 dmg）、Windows（安装包）、Linux（deb 等，视 bundle 配置）。
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要关联的 Git 标签（例如 v0.5.5）；若尚不存在，将在此提交上创建"
+        description: "要关联的 Git 标签（例如 v0.7.3）；若尚不存在，将在此提交上创建"
         required: true
         type: string
       draft:
@@ -87,10 +87,38 @@ jobs:
           npm ci
           npm ci --prefix web
 
+      - name: Validate macOS signing and notarization secrets
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Missing required secret: $var"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "macOS 签名/公证 secrets 缺失，已阻止发布，避免产生“已损坏”安装包。"
+            exit 1
+          fi
+
       - name: Build and upload bundles
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           # 仓库根目录含 package.json + src-tauri/；留空则自动使用 npm run tauri
           projectPath: .

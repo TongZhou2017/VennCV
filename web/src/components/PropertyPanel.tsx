@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAppStore } from "../store/appStore";
 import type { ProjectStatus, RelationType } from "../types";
 import { PROJECT_STATUS_META, coerceProjectStatus, rgbaToCss } from "../types";
+import { ProjectTimeFields } from "./ProjectTimeFields";
+import { AuthorPanel } from "./AuthorPanel";
+import "./property-panel.css";
 
 const STATUSES: ProjectStatus[] = [
   "Published",
@@ -10,6 +13,79 @@ const STATUSES: ProjectStatus[] = [
   "SteadyProgress",
   "ToBeStarted",
 ];
+
+type PropertyTab = "properties" | "publication" | "authors";
+
+const PROPERTY_TABS: PropertyTab[] = ["properties", "publication", "authors"];
+
+function propertyTabLabel(tab: PropertyTab): string {
+  switch (tab) {
+    case "properties":
+      return "属性";
+    case "publication":
+      return "发表";
+    case "authors":
+      return "作者";
+    default: {
+      const unexpected: never = tab;
+      return unexpected;
+    }
+  }
+}
+
+function PanelFrame(props: {
+  tab: PropertyTab;
+  counts: Record<PropertyTab, number>;
+  onTab: (tab: PropertyTab) => void;
+  children: ReactNode;
+}) {
+  const { tab, counts, onTab, children } = props;
+  return (
+    <aside className="property-panel">
+      <div
+        className="property-tabs"
+        role="tablist"
+        aria-label="右侧栏"
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const index = PROPERTY_TABS.indexOf(tab);
+          const delta = event.key === "ArrowRight" ? 1 : -1;
+          const next = PROPERTY_TABS[(index + delta + PROPERTY_TABS.length) % PROPERTY_TABS.length];
+          if (next) onTab(next);
+        }}
+      >
+        {PROPERTY_TABS.map((id) => {
+          const count = counts[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`property-tab-${id}`}
+              className={tab === id ? "property-tab is-active" : "property-tab"}
+              aria-selected={tab === id}
+              aria-controls="property-panel"
+              onClick={() => onTab(id)}
+            >
+              {propertyTabLabel(id)}
+              {count > 0 ? <span className="property-tab-count">{count}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <form
+        id="property-panel"
+        role="tabpanel"
+        aria-labelledby={`property-tab-${tab}`}
+        className="property-body"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        {children}
+      </form>
+    </aside>
+  );
+}
 
 function RelationTagsEditor(props: {
   fromId: string;
@@ -79,6 +155,12 @@ export function PropertyPanel() {
 
   const [newRelToId, setNewRelToId] = useState("");
   const [newRelIndirect, setNewRelIndirect] = useState(false);
+  const [tab, setTab] = useState<PropertyTab>("properties");
+  const selectedPersonId = useAppStore((s) => s.selectedPersonId);
+
+  useEffect(() => {
+    if (selectedPersonId) setTab("authors");
+  }, [selectedPersonId]);
 
   const relatedRelations = useMemo(() => {
     if (!selectedProjectId) return [];
@@ -96,24 +178,35 @@ export function PropertyPanel() {
 
   if (!selectedProjectId || !projectEditBuffer) {
     return (
-      <aside
-        style={{
-          width: 260,
-          flexShrink: 0,
-          borderLeft: "1px solid #ddd",
-          background: "#fafafa",
-          padding: 16,
-          fontSize: 13,
-          color: "#888",
-        }}
+      <PanelFrame
+        tab={tab}
+        counts={{ properties: 0, publication: 0, authors: 0 }}
+        onTab={setTab}
       >
-        选中画布或列表中的项目以编辑属性
-      </aside>
+        {(() => {
+          switch (tab) {
+            case "authors":
+              return <AuthorPanel />;
+            case "properties":
+            case "publication":
+              return <p className="property-empty">选中画布或列表中的项目以编辑属性</p>;
+            default: {
+              const unexpected: never = tab;
+              return unexpected;
+            }
+          }
+        })()}
+      </PanelFrame>
     );
   }
 
   const buf = projectEditBuffer;
   const fieldIds = Object.keys(data.fields);
+  const counts: Record<PropertyTab, number> = {
+    properties: relatedRelations.length,
+    publication: buf.journal_submissions?.length ?? 0,
+    authors: data.authorships.filter((link) => link.project_id === selectedProjectId).length,
+  };
 
   const update = (patch: Partial<typeof buf>) => {
     setProjectEditBuffer({ ...buf, ...patch });
@@ -126,241 +219,238 @@ export function PropertyPanel() {
     update({ field_ids: [...set] });
   };
 
-  return (
-    <aside
-      style={{
-        width: 280,
-        flexShrink: 0,
-        borderLeft: "1px solid #ddd",
-        background: "#fafafa",
-        padding: 12,
-        overflow: "auto",
-      }}
-    >
-      {/* 防止回车触发表单默认提交（部分宿主/扩展会隐式包 form） */}
-      <form
-        onSubmit={(e) => e.preventDefault()}
-        style={{ display: "contents" }}
-      >
-      <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>属性</div>
-      <div style={{ fontSize: 10, color: "#999", marginBottom: 10, lineHeight: 1.35 }}>
-        名称、描述、状态等约半秒内自动保存；关系编辑立即保存。需要撤销粒度或版本锚点时，请用工具栏「时间戳检查点」。
-      </div>
-      <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>名称</label>
-      <input
-        type="text"
-        value={buf.name}
-        onChange={(e) => update({ name: e.target.value })}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.preventDefault();
-        }}
-        style={{ width: "100%", padding: 6, marginBottom: 12 }}
-      />
-      <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>描述</label>
-      <textarea
-        value={buf.description}
-        onChange={(e) => update({ description: e.target.value })}
-        rows={4}
-        style={{ width: "100%", padding: 6, marginBottom: 12, resize: "vertical" }}
-      />
-      <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>状态</label>
-      <select
-        value={coerceProjectStatus(buf.status)}
-        onChange={(e) => update({ status: e.target.value as ProjectStatus })}
-        style={{ width: "100%", padding: 6, marginBottom: 12 }}
-      >
-        {STATUSES.map((s) => (
-          <option key={s} value={s}>
-            {PROJECT_STATUS_META[s].label}
-          </option>
-        ))}
-      </select>
-      <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>完成度 %</label>
-      <input
-        type="number"
-        min={0}
-        max={100}
-        value={Number.isFinite(buf.completion_percentage) ? buf.completion_percentage : 0}
-        onChange={(e) => {
-          const n = Number(e.target.value);
-          if (!Number.isFinite(n)) return;
-          update({ completion_percentage: Math.max(0, Math.min(100, n)) });
-        }}
-        style={{ width: "100%", padding: 6, marginBottom: 12 }}
-      />
-      <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <input
-          type="checkbox"
-          checked={buf.canvas_hidden !== true}
-          onChange={(e) => {
-            const next = { ...buf };
-            if (e.target.checked) delete next.canvas_hidden;
-            else next.canvas_hidden = true;
-            setProjectEditBuffer(next);
-          }}
-        />
-        <span>在画布上显示该项目圆圈</span>
-      </label>
-      <label style={{ fontSize: 12, display: "block", marginBottom: 8 }}>所属领域</label>
-      <div style={{ marginBottom: 12 }}>
-        {fieldIds.map((fid) => (
-          <label key={fid} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+  const renderTab = () => {
+    switch (tab) {
+      case "properties":
+        return (
+          <>
+            <p className="property-note">名称、描述、状态约半秒内自动保存。期刊和时间点在「发表」页。</p>
+            <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>名称</label>
             <input
-              type="checkbox"
-              checked={buf.field_ids.includes(fid)}
-              onChange={() => toggleField(fid)}
+              type="text"
+              value={buf.name}
+              onChange={(e) => update({ name: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.preventDefault();
+              }}
+              style={{ width: "100%", padding: 6, marginBottom: 12 }}
             />
-            <span style={{ fontSize: 12 }}>{data.fields[fid]?.name ?? fid}</span>
-          </label>
-        ))}
-      </div>
-
-      <div style={{ fontSize: 11, color: "#666", margin: "16px 0 8px" }}>关系</div>
-      <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>
-        与当前项目相连的边；类型、标签、颜色、线宽会立即写入工作区（无需点「应用更改」）。
-      </div>
-
-      {relatedRelations.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#999", marginBottom: 12 }}>暂无关系</div>
-      ) : (
-        <div style={{ marginBottom: 16 }}>
-          {relatedRelations.map(({ rel, index }) => {
-            const out = rel.from_id === selectedProjectId;
-            const otherId = out ? rel.to_id : rel.from_id;
-            const otherName = data.projects[otherId]?.name ?? otherId;
-            return (
-              <div
-                key={`${index}-${rel.from_id}-${rel.to_id}`}
+            <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>描述</label>
+            <textarea
+              value={buf.description}
+              onChange={(e) => update({ description: e.target.value })}
+              rows={4}
+              style={{ width: "100%", padding: 6, marginBottom: 12, resize: "vertical" }}
+            />
+            <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>状态</label>
+            <select
+              value={coerceProjectStatus(buf.status)}
+              onChange={(e) => update({ status: e.target.value as ProjectStatus })}
+              style={{ width: "100%", padding: 6, marginBottom: 12 }}
+            >
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {PROJECT_STATUS_META[s].label}
+                </option>
+              ))}
+            </select>
+            <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>完成度 %</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={Number.isFinite(buf.completion_percentage) ? buf.completion_percentage : 0}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n)) return;
+                update({ completion_percentage: Math.max(0, Math.min(100, n)) });
+              }}
+              style={{ width: "100%", padding: 6, marginBottom: 4 }}
+            />
+            <p className="property-note">100% 表示开始投稿。</p>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <input
+                type="checkbox"
+                checked={buf.canvas_hidden !== true}
+                onChange={(e) => {
+                  const next = { ...buf };
+                  if (e.target.checked) delete next.canvas_hidden;
+                  else next.canvas_hidden = true;
+                  setProjectEditBuffer(next);
+                }}
+              />
+              <span>在画布上显示该项目圆圈</span>
+            </label>
+            <label style={{ fontSize: 12, display: "block", marginBottom: 8 }}>所属领域</label>
+            <div>
+              {fieldIds.map((fid) => (
+                <label key={fid} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={buf.field_ids.includes(fid)}
+                    onChange={() => toggleField(fid)}
+                  />
+                  <span style={{ fontSize: 12 }}>{data.fields[fid]?.name ?? fid}</span>
+                </label>
+              ))}
+            </div>
+            <div className="author-section-title">关系</div>
+            <p className="property-note">与当前项目相连的边会立即保存。</p>
+            {relatedRelations.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#999", marginBottom: 12 }}>暂无关系</div>
+            ) : (
+              <div style={{ marginBottom: 16 }}>
+                {relatedRelations.map(({ rel, index }) => {
+                  const out = rel.from_id === selectedProjectId;
+                  const otherId = out ? rel.to_id : rel.from_id;
+                  const otherName = data.projects[otherId]?.name ?? otherId;
+                  return (
+                    <div
+                      key={`${index}-${rel.from_id}-${rel.to_id}`}
+                      style={{
+                        border: "1px solid #e0e0e0",
+                        borderRadius: 4,
+                        padding: 8,
+                        marginBottom: 8,
+                        background: "#fff",
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>
+                        {out ? "→" : "←"} {otherName}
+                      </div>
+                      <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>类型</label>
+                      <select
+                        value={rel.relation_type}
+                        onChange={(e) =>
+                          updateRelationAt(index, { relation_type: e.target.value as RelationType })
+                        }
+                        style={{ width: "100%", padding: 4, marginBottom: 8, fontSize: 12 }}
+                      >
+                        <option value="Direct">实线（直接）</option>
+                        <option value="Indirect">虚线（间接）</option>
+                      </select>
+                      <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>标签（逗号分隔）</label>
+                      <RelationTagsEditor fromId={rel.from_id} toId={rel.to_id} tags={rel.tags} />
+                      <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>颜色 RGBA</label>
+                      <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+                        {([0, 1, 2, 3] as const).map((ci) => (
+                          <input
+                            key={ci}
+                            type="number"
+                            min={0}
+                            max={255}
+                            value={rel.color[ci]}
+                            title={ci === 3 ? "A (0–255)" : "RGB"}
+                            onChange={(e) => {
+                              const v = Math.min(255, Math.max(0, Math.round(Number(e.target.value) || 0)));
+                              const c = [...rel.color] as [number, number, number, number];
+                              c[ci] = v;
+                              updateRelationAt(index, { color: c });
+                            }}
+                            style={{ width: 52, padding: 4, fontSize: 11 }}
+                          />
+                        ))}
+                        <span
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 4,
+                            border: "1px solid #ccc",
+                            background: rgbaToCss(rel.color),
+                          }}
+                          title="预览"
+                        />
+                      </div>
+                      <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>线宽</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        step={0.5}
+                        value={rel.width}
+                        onChange={(e) =>
+                          updateRelationAt(index, { width: Math.max(1, Number(e.target.value) || 1) })
+                        }
+                        style={{ width: "100%", padding: 6, marginBottom: 8, fontSize: 12 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeRelationAt(index)}
+                        style={{
+                          width: "100%",
+                          padding: "6px",
+                          fontSize: 12,
+                          background: "#f5f5f5",
+                          border: "1px solid #ddd",
+                          borderRadius: 4,
+                        }}
+                      >
+                        删除此关系
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>新建关系</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              <select
+                value={newRelToId}
+                onChange={(e) => setNewRelToId(e.target.value)}
+                style={{ width: "100%", padding: 6, fontSize: 12 }}
+              >
+                <option value="">选择目标项目…</option>
+                {otherProjectIds.map((id) => (
+                  <option key={id} value={id}>
+                    {data.projects[id]?.name ?? id}
+                  </option>
+                ))}
+              </select>
+              <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={newRelIndirect}
+                  onChange={(e) => setNewRelIndirect(e.target.checked)}
+                />
+                间接（虚线）
+              </label>
+              <button
+                type="button"
+                disabled={!newRelToId}
+                onClick={() => {
+                  if (!selectedProjectId || !newRelToId) return;
+                  createRelation(selectedProjectId, newRelToId, { indirect: newRelIndirect });
+                  setNewRelToId("");
+                  setNewRelIndirect(false);
+                }}
                 style={{
-                  border: "1px solid #e0e0e0",
+                  padding: "8px",
+                  fontSize: 12,
+                  background: newRelToId ? "#e3f2fd" : "#eee",
+                  border: "1px solid #90caf9",
                   borderRadius: 4,
-                  padding: 8,
-                  marginBottom: 8,
-                  background: "#fff",
+                  cursor: newRelToId ? "pointer" : "not-allowed",
                 }}
               >
-                <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>
-                  {out ? "→" : "←"} {otherName}
-                </div>
-                <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>类型</label>
-                <select
-                  value={rel.relation_type}
-                  onChange={(e) =>
-                    updateRelationAt(index, { relation_type: e.target.value as RelationType })
-                  }
-                  style={{ width: "100%", padding: 4, marginBottom: 8, fontSize: 12 }}
-                >
-                  <option value="Direct">实线（直接）</option>
-                  <option value="Indirect">虚线（间接）</option>
-                </select>
-                <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>标签（逗号分隔）</label>
-                <RelationTagsEditor fromId={rel.from_id} toId={rel.to_id} tags={rel.tags} />
-                <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>颜色 RGBA</label>
-                <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
-                  {([0, 1, 2, 3] as const).map((ci) => (
-                    <input
-                      key={ci}
-                      type="number"
-                      min={0}
-                      max={255}
-                      value={rel.color[ci]}
-                      title={ci === 3 ? "A (0–255)" : "RGB"}
-                      onChange={(e) => {
-                        const v = Math.min(255, Math.max(0, Math.round(Number(e.target.value) || 0)));
-                        const c = [...rel.color] as [number, number, number, number];
-                        c[ci] = v;
-                        updateRelationAt(index, { color: c });
-                      }}
-                      style={{ width: 52, padding: 4, fontSize: 11 }}
-                    />
-                  ))}
-                  <span
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 4,
-                      border: "1px solid #ccc",
-                      background: rgbaToCss(rel.color),
-                    }}
-                    title="预览"
-                  />
-                </div>
-                <label style={{ fontSize: 11, display: "block", marginBottom: 4 }}>线宽</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  step={0.5}
-                  value={rel.width}
-                  onChange={(e) =>
-                    updateRelationAt(index, { width: Math.max(1, Number(e.target.value) || 1) })
-                  }
-                  style={{ width: "100%", padding: 6, marginBottom: 8, fontSize: 12 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeRelationAt(index)}
-                  style={{
-                    width: "100%",
-                    padding: "6px",
-                    fontSize: 12,
-                    background: "#f5f5f5",
-                    border: "1px solid #ddd",
-                    borderRadius: 4,
-                  }}
-                >
-                  删除此关系
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                添加关系
+              </button>
+            </div>
+          </>
+        );
+      case "publication":
+        return <ProjectTimeFields project={buf} onChange={update} />;
+      case "authors":
+        return <AuthorPanel />;
+      default: {
+        const unexpected: never = tab;
+        return unexpected;
+      }
+    }
+  };
 
-      <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>新建关系</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-        <select
-          value={newRelToId}
-          onChange={(e) => setNewRelToId(e.target.value)}
-          style={{ width: "100%", padding: 6, fontSize: 12 }}
-        >
-          <option value="">选择目标项目…</option>
-          {otherProjectIds.map((id) => (
-            <option key={id} value={id}>
-              {data.projects[id]?.name ?? id}
-            </option>
-          ))}
-        </select>
-        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={newRelIndirect}
-            onChange={(e) => setNewRelIndirect(e.target.checked)}
-          />
-          间接（虚线）
-        </label>
-        <button
-          type="button"
-          disabled={!newRelToId}
-          onClick={() => {
-            if (!selectedProjectId || !newRelToId) return;
-            createRelation(selectedProjectId, newRelToId, { indirect: newRelIndirect });
-            setNewRelToId("");
-            setNewRelIndirect(false);
-          }}
-          style={{
-            padding: "8px",
-            fontSize: 12,
-            background: newRelToId ? "#e3f2fd" : "#eee",
-            border: "1px solid #90caf9",
-            borderRadius: 4,
-            cursor: newRelToId ? "pointer" : "not-allowed",
-          }}
-        >
-          添加关系
-        </button>
-      </div>
-      </form>
-    </aside>
+  return (
+    <PanelFrame tab={tab} counts={counts} onTab={setTab}>
+      {renderTab()}
+    </PanelFrame>
   );
 }

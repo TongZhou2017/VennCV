@@ -5,10 +5,28 @@ import { Toolbar } from "./Toolbar";
 import { LeftSidebar } from "./LeftSidebar";
 import { PropertyPanel } from "./PropertyPanel";
 import { VisualizationCanvas } from "./VisualizationCanvas";
+import { TimelineView } from "./TimelineView";
+import { CollaborationView } from "./CollaborationView";
 import { ExportModal } from "./ExportModal";
 import { SettingsModal } from "./SettingsModal";
 import { VersionHistoryModal } from "./VersionHistoryModal";
 import { readVisualizationRenderPrefsFromStorage } from "../storage/uiPrefs";
+import type { WorkspaceView } from "../store/appStore";
+
+function WorkspaceCanvas({ view }: { view: WorkspaceView }) {
+  switch (view) {
+    case "venn":
+      return <VisualizationCanvas />;
+    case "timeline":
+      return <TimelineView />;
+    case "collaboration":
+      return <CollaborationView />;
+    default: {
+      const unreachable: never = view;
+      return unreachable;
+    }
+  }
+}
 
 export function MainShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -26,7 +44,9 @@ export function MainShell() {
   const leftSidebarOpen = useAppStore((s) => s.leftSidebarOpen);
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen);
   const vizWorkspacePreview = useAppStore((s) => s.vizWorkspacePreview);
+  const workspaceView = useAppStore((s) => s.workspaceView);
   const setVizWorkspacePreview = useAppStore((s) => s.setVizWorkspacePreview);
+  const vennPreview = vizWorkspacePreview && workspaceView === "venn";
   const importRef = useRef<HTMLInputElement>(null);
 
   const onImportPick = useCallback(
@@ -233,10 +253,10 @@ export function MainShell() {
           position: "relative",
         }}
       >
-        {leftSidebarOpen && !vizWorkspacePreview ? <LeftSidebar /> : null}
+        {leftSidebarOpen && !vennPreview ? <LeftSidebar /> : null}
         <div
           style={
-            vizWorkspacePreview
+            vennPreview
               ? {
                   position: "absolute",
                   left: 0,
@@ -259,8 +279,8 @@ export function MainShell() {
                 }
           }
         >
-          <VisualizationCanvas />
-          {vizWorkspacePreview ? (
+          <WorkspaceCanvas view={workspaceView} />
+          {vennPreview ? (
             <button
               type="button"
               onClick={() => setVizWorkspacePreview(false)}
@@ -284,7 +304,7 @@ export function MainShell() {
             </button>
           ) : null}
         </div>
-        {rightSidebarOpen && !vizWorkspacePreview ? <PropertyPanel /> : null}
+        {rightSidebarOpen && !vennPreview ? <PropertyPanel /> : null}
       </div>
       <ExportModal />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
