@@ -7,6 +7,9 @@ import {
   defaultReportWindow,
   isBlockDone,
   progressReport,
+  progressReportFileName,
+  progressReportText,
+  reportSpanLabel,
   slotsBottomUp,
   slotsOf,
   type ProgressReportSpan,
@@ -22,21 +25,29 @@ function peopleChoices(people: Record<string, Person>): Person[] {
   return Object.values(people).sort((a, b) => a.name.localeCompare(b.name, "zh") || a.id.localeCompare(b.id));
 }
 
-function spanName(span: ProgressReportSpan): string {
-  switch (span) {
-    case "day":
-      return "日";
-    case "week":
-      return "周";
-    case "month":
-      return "月";
-    case "year":
-      return "年";
-    default: {
-      const unexpected: never = span;
-      return unexpected;
-    }
-  }
+function PenIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <path
+        d="M11.4 1.8a1.4 1.4 0 0 1 2 0l.8.8a1.4 1.4 0 0 1 0 2L6.2 12.6 3 13.4l.8-3.2 7.6-8.4Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M9.8 3.2 12.8 6.2" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function downloadText(filename: string, body: string) {
+  const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function ProgressEditor(props: { projectId: string }) {
@@ -54,6 +65,9 @@ export function ProgressEditor(props: { projectId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [span, setSpan] = useState<ProgressReportSpan>("month");
   const [layoutOpen, setLayoutOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reportNotice, setReportNotice] = useState("");
   const [scope, setScope] = useState<{ projectId: string; window: ProgressReportWindow | null }>({
     projectId: props.projectId,
     window: null,
@@ -95,6 +109,15 @@ export function ProgressEditor(props: { projectId: string }) {
     if (!title) return;
     addBlock(project!.id, activeSlot.id, title, date, due, personId || null);
     setDraft("");
+    setCreating(false);
+  }
+
+  function exportReport() {
+    const text = progressReportText(project, span, reportWindow, today, (personId) =>
+      personId && people[personId] ? people[personId].name : "未指定",
+    );
+    downloadText(progressReportFileName(project.name, today), text);
+    setReportNotice("已下载报告。");
   }
 
   const selectedDetail =
@@ -145,9 +168,9 @@ export function ProgressEditor(props: { projectId: string }) {
           </select>
         </label>
         <label className="task-field">
-          <span>定下</span>
+          <span>开始</span>
           <DateField
-            ariaLabel="定下日期"
+            ariaLabel="开始日期"
             value={selected.date}
             allowEmpty={false}
             onChange={(next) => {
@@ -229,121 +252,152 @@ export function ProgressEditor(props: { projectId: string }) {
               selectedBlockId={selected?.id ?? null}
               onSelectBlock={setSelectedId}
             />
-            <p className="task-hint">灰色块是还没做完的，数字是剩余天数。标成完成才计入进度。</p>
+            <p className="task-hint">灰色块是还没做完的，数字是开始到期限一共几天。标成完成才计入进度。</p>
           </section>
           {layoutOpen ? <ProgressLayout projectId={project.id} onClose={() => setLayoutOpen(false)} /> : null}
           {selectedDetail && !detailInList ? <section className="task-card">{selectedDetail}</section> : null}
           <section className="task-card">
-            <h3>记下待办</h3>
-            <label className="task-field">
-              <span>事项</span>
-              <input
-                aria-label="新事项"
-                value={draft}
-                placeholder="要做什么"
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    placeBlock();
-                  }
-                }}
-              />
-            </label>
-            <label className="task-field">
-              <span>所属部分</span>
-              <select
-                aria-label="新待办所属部分"
-                value={activeSlot?.id ?? ""}
-                onChange={(event) => setSlotId(event.target.value)}
-              >
-                {slots.map((slot) => (
-                  <option key={slot.id} value={slot.id}>
-                    {slot.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="task-field">
-              <span>人员</span>
-              <select aria-label="人员" value={personId} onChange={(event) => setPersonId(event.target.value)}>
-                <option value="">不指定</option>
-                {names.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="task-field-pair">
-              <label className="task-field">
-                <span>定下</span>
-                <DateField
-                  ariaLabel="新待办定下日期"
-                  value={date || null}
-                  allowEmpty={false}
-                  onChange={(next) => {
-                    if (!next) return;
-                    setDate(next);
-                    setDue((current) => (current < next ? next : current));
-                  }}
-                />
-              </label>
-              <label className="task-field">
-                <span>期限</span>
-                <DateField
-                  ariaLabel="新待办完成期限"
-                  value={due || null}
-                  allowEmpty={false}
-                  onChange={(next) => {
-                    if (next) setDue(next < date ? date : next);
-                  }}
-                />
-              </label>
-            </div>
-            <button type="button" className="task-primary" disabled={!draft.trim()} onClick={placeBlock}>
-              记下待办
-            </button>
-          </section>
-          <section className="task-card">
             <div className="task-card-head">
-              <h3>回看</h3>
-              <button
-                type="button"
-                className="task-text"
-                aria-pressed={windowOverride === null}
-                onClick={() => setReportWindow(null)}
-              >
-                全部
-              </button>
-            </div>
-            <div className="task-span" role="group" aria-label="按时间回看">
-              {(["day", "week", "month", "year"] as const).map((item) => (
-                <button key={item} type="button" aria-pressed={span === item} onClick={() => setSpan(item)}>
-                  {spanName(item)}
+              <h3>待办事项</h3>
+              <div className="task-card-actions">
+                <button
+                  type="button"
+                  className="task-text"
+                  aria-pressed={creating}
+                  onClick={() => setCreating((open) => !open)}
+                >
+                  创建
                 </button>
-              ))}
+                <button
+                  type="button"
+                  className="task-text"
+                  aria-pressed={reviewOpen}
+                  onClick={() => setReviewOpen((open) => !open)}
+                >
+                  回看
+                </button>
+              </div>
             </div>
-            <div className="task-field-pair">
-              <label className="task-field">
-                <span>从</span>
-                <DateField
-                  ariaLabel="回看开始"
-                  value={reportWindow.from}
-                  allowEmpty
-                  onChange={(next) => setReportWindow({ from: next, to: reportWindow.to })}
-                />
-              </label>
-              <label className="task-field">
-                <span>到</span>
-                <DateField
-                  ariaLabel="回看结束"
-                  value={reportWindow.to}
-                  allowEmpty
-                  onChange={(next) => setReportWindow({ from: reportWindow.from, to: next })}
-                />
-              </label>
-            </div>
+            {creating ? (
+              <div className="task-fold">
+                <h3>记下待办</h3>
+                <label className="task-field">
+                  <span>事项</span>
+                  <input
+                    aria-label="新事项"
+                    value={draft}
+                    placeholder="要做什么"
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        placeBlock();
+                      }
+                    }}
+                  />
+                </label>
+                <label className="task-field">
+                  <span>所属部分</span>
+                  <select
+                    aria-label="新待办所属部分"
+                    value={activeSlot?.id ?? ""}
+                    onChange={(event) => setSlotId(event.target.value)}
+                  >
+                    {slots.map((slot) => (
+                      <option key={slot.id} value={slot.id}>
+                        {slot.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="task-field">
+                  <span>人员</span>
+                  <select aria-label="人员" value={personId} onChange={(event) => setPersonId(event.target.value)}>
+                    <option value="">不指定</option>
+                    {names.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="task-field-pair">
+                  <label className="task-field">
+                    <span>开始</span>
+                    <DateField
+                      ariaLabel="新待办开始日期"
+                      value={date || null}
+                      allowEmpty={false}
+                      onChange={(next) => {
+                        if (!next) return;
+                        setDate(next);
+                        setDue((current) => (current < next ? next : current));
+                      }}
+                    />
+                  </label>
+                  <label className="task-field">
+                    <span>期限</span>
+                    <DateField
+                      ariaLabel="新待办完成期限"
+                      value={due || null}
+                      allowEmpty={false}
+                      onChange={(next) => {
+                        if (next) setDue(next < date ? date : next);
+                      }}
+                    />
+                  </label>
+                </div>
+                <button type="button" className="task-primary" disabled={!draft.trim()} onClick={placeBlock}>
+                  记下待办
+                </button>
+              </div>
+            ) : null}
+            {reviewOpen ? (
+              <div className="task-fold">
+                <div className="task-card-head">
+                  <span className="task-fold-label">回看范围</span>
+                  <button
+                    type="button"
+                    className="task-text"
+                    aria-pressed={windowOverride === null}
+                    onClick={() => setReportWindow(null)}
+                  >
+                    全部
+                  </button>
+                </div>
+                <div className="task-span" role="group" aria-label="按时间回看">
+                  {(["day", "week", "month", "year"] as const).map((item) => (
+                    <button key={item} type="button" aria-pressed={span === item} onClick={() => setSpan(item)}>
+                      {reportSpanLabel(item)}
+                    </button>
+                  ))}
+                </div>
+                <div className="task-field-pair">
+                  <label className="task-field">
+                    <span>从</span>
+                    <DateField
+                      ariaLabel="回看开始"
+                      value={reportWindow.from}
+                      allowEmpty
+                      onChange={(next) => setReportWindow({ from: next, to: reportWindow.to })}
+                    />
+                  </label>
+                  <label className="task-field">
+                    <span>到</span>
+                    <DateField
+                      ariaLabel="回看结束"
+                      value={reportWindow.to}
+                      allowEmpty
+                      onChange={(next) => setReportWindow({ from: reportWindow.from, to: next })}
+                    />
+                  </label>
+                </div>
+                <button type="button" className="task-primary" onClick={exportReport}>
+                  导出报告
+                </button>
+                {reportNotice ? <p className="task-hint">{reportNotice}</p> : null}
+              </div>
+            ) : null}
             {report.length === 0 ? (
               <p className="task-hint">
                 {blocksOf(project).length === 0 ? "还没有待办。" : "这段时间里没有待办。"}
@@ -358,20 +412,25 @@ export function ProgressEditor(props: { projectId: string }) {
                     const open = entry.block.id === selected?.id;
                     return (
                       <div key={entry.block.id}>
-                        <button
-                          type="button"
-                          className={open ? "task-row is-selected" : "task-row"}
-                          onClick={() => setSelectedId(open ? null : entry.block.id)}
-                        >
+                        <div className={open ? "task-row is-selected" : "task-row"}>
                           <span className="task-row-title">{entry.block.title}</span>
                           <span className={`task-badge ${toneClass(mark.tone)}`}>{mark.text}</span>
+                          <button
+                            type="button"
+                            className="task-icon"
+                            aria-label={`编辑 ${entry.block.title}`}
+                            aria-pressed={open}
+                            onClick={() => setSelectedId(open ? null : entry.block.id)}
+                          >
+                            <PenIcon />
+                          </button>
                           <span className="task-row-meta">
                             {`${entry.slot.label} · ${person?.name || "未指定"}`}
                           </span>
                           <span className="task-row-meta">
                             {entry.block.due ? `${entry.block.date} → ${entry.block.due}` : entry.block.date}
                           </span>
-                        </button>
+                        </div>
                         {open ? selectedDetail : null}
                       </div>
                     );

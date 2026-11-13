@@ -11,6 +11,8 @@ import {
   defaultReportWindow,
   progressReport,
   progressReportAcross,
+  progressReportFileName,
+  progressReportText,
   projectThroughDate,
   removeProgressBlock,
   removeProgressFigure,
@@ -18,6 +20,7 @@ import {
   setFigureShare,
   isBlockDone,
   remainingDays,
+  scheduledDays,
   slotsOf,
   updateProgressBlock,
   updateProgressSlot,
@@ -175,6 +178,36 @@ describe("progress building", () => {
     expect(shared?.lines.map((line) => `${line.projectName}:${line.block.title}`)).toEqual(["甲:搭框架", "乙:对故事"]);
   });
 
+  it("writes the current review as a text report", () => {
+    let next = applyProgressTemplate(project({ name: "甲", completion_percentage: 0 }));
+    next = addProgressBlock(next, slotId(next, "方法-数据"), "整理", "2026-01-05", "2026-01-12", null);
+    const open = next.progress_blocks?.[0];
+    next = updateProgressBlock(next, open!.id, { note: "先对表" });
+    const text = progressReportText(next, "month", { from: "2026-01-01", to: "2026-01-31" }, "2026-01-06", () => "未指定");
+    expect(text).toBe(
+      [
+        "回看报告",
+        "项目：甲",
+        "完成度：0%",
+        "范围：2026-01-01 至 2026-01-31",
+        "按：月",
+        "截至：2026-01-06",
+        "",
+        "2026-01",
+        "整理（剩余 6 天）",
+        "方法-数据 · 未指定",
+        "2026-01-05 → 2026-01-12",
+        "开始到期限 7 天",
+        "备注：先对表",
+        "",
+      ].join("\n"),
+    );
+    expect(progressReportText(next, "day", { from: "2026-02-01", to: "2026-02-28" }, "2026-01-06", () => "未指定")).toContain(
+      "这段时间里没有待办。",
+    );
+    expect(progressReportFileName("甲 / 乙", "2026-01-06")).toBe("甲乙-回看-2026-01-06.txt");
+  });
+
   it("defaults the report window to the whole span and can narrow it", () => {
     let next = applyProgressTemplate(project({ expected_completion_date: "2026-12-01" }));
     next = addProgressBlock(next, slotId(next, "方法-数据"), "整理", "2026-01-05", "2026-01-20", null);
@@ -192,7 +225,17 @@ describe("progress building", () => {
     expect(during.map((group) => group.entries[0]?.block.title)).toEqual(["出图"]);
   });
 
-  it("keeps the deadline on or after the day the task was set", () => {
+  it("counts the days from the start to the deadline, not from today", () => {
+    let next = applyProgressTemplate(project({ completion_percentage: 0 }));
+    next = addProgressBlock(next, slotId(next, "方法-数据"), "整理", "2026-11-20", "2026-11-27", null);
+    const open = next.progress_blocks?.[0];
+    expect(scheduledDays(open!)).toBe(7);
+    expect(remainingDays(open!, "2026-11-13")).toBe(14);
+    const done = updateProgressBlock(next, open!.id, { completed_on: "2026-11-21" });
+    expect(scheduledDays(done.progress_blocks?.[0]!)).toBeNull();
+  });
+
+  it("keeps the deadline on or after the start day", () => {
     let next = applyProgressTemplate(project({ completion_percentage: 0 }));
     next = addProgressBlock(next, slotId(next, "方法-数据"), "整理", "2026-11-13", "2026-11-01", null);
     const id = next.progress_blocks?.[0]?.id ?? "";

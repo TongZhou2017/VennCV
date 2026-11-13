@@ -153,7 +153,7 @@ export interface Project {
    */
   progress_slots?: ProgressSlot[];
   /**
-   * 待办。某一天定下，并约定在某一天之前做完。
+   * 待办。从某一天开始，并约定在某一天之前做完。
    * 标成完成之后才计入进度，最高 100。100% 表示开始投稿。
    * 旧工作区缺省为空。
    */
@@ -182,18 +182,18 @@ export interface ProgressSlot {
   color?: string;
 }
 
-/** 某一天定下、限期内要做完的一件事。 */
+/** 从某一天开始、限期内要做完的一件事。 */
 export interface ProgressBlock {
   id: string;
   slot_id: string;
   title: string;
-  /** 定下这件事的日期 `YYYY-MM-DD`。 */
+  /** 开始日期 `YYYY-MM-DD`。 */
   date: string;
   /** 要在这一天之前做完。旧数据没有这一项。 */
   due?: string | null;
   /**
    * 标记完成的日期。没有则还没完成，不计进度，摘要图上是灰色块。
-   * 旧数据没有这一项时，读入后算在定下那天完成。
+   * 旧数据没有这一项时，读入后算在开始那天完成。
    */
   completed_on?: string | null;
   person_id: string | null;

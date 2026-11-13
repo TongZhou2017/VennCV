@@ -194,7 +194,7 @@ export function addIsoDays(iso: string, days: number): string {
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
-/** 未完成待办距离期限还剩几天。过期为负数。已完成或没有期限时没有这个数字。 */
+/** 未完成待办从这一天到期限还剩几天。过期为负数。已完成或没有期限时没有这个数字。 */
 export function remainingDays(block: Pick<ProgressBlock, "completed_on" | "due">, asOf: string): number | null {
   if (isBlockDone(block)) return null;
   const due = parseIsoDate(block.due);
@@ -202,7 +202,20 @@ export function remainingDays(block: Pick<ProgressBlock, "completed_on" | "due">
   return isoDaySpan(asOf, due);
 }
 
-/** 只保留这一天和更早定下的待办。还没到完成日的，在这一天仍算未完成。 */
+/**
+ * 未完成待办从开始到期限一共几天。
+ * 这个数字不看今天：不是今天到开始，也不是今天到期限。
+ * 已完成、没有开始或没有期限时没有这个数字。
+ */
+export function scheduledDays(block: Pick<ProgressBlock, "completed_on" | "date" | "due">): number | null {
+  if (isBlockDone(block)) return null;
+  const start = parseIsoDate(block.date);
+  const due = parseIsoDate(block.due);
+  if (!start || !due) return null;
+  return isoDaySpan(start, due);
+}
+
+/** 只保留这一天和更早开始的待办。还没到完成日的，在这一天仍算未完成。 */
 export function projectThroughDate(project: Project, date: string): Project {
   return {
     ...project,
@@ -623,6 +636,77 @@ function periodLabel(key: string, span: ProgressReportSpan): string {
       return unexpected;
     }
   }
+}
+
+export function reportSpanLabel(span: ProgressReportSpan): string {
+  switch (span) {
+    case "day":
+      return "日";
+    case "week":
+      return "周";
+    case "month":
+      return "月";
+    case "year":
+      return "年";
+    default: {
+      const unexpected: never = span;
+      return unexpected;
+    }
+  }
+}
+
+function reportStatus(block: ProgressBlock, today: string): string {
+  if (isBlockDone(block)) {
+    const on = parseIsoDate(block.completed_on);
+    return on ? `已完成 ${on}` : "已完成";
+  }
+  const left = remainingDays(block, today);
+  if (left === null) return "未完成";
+  if (left < 0) return `逾期 ${-left} 天`;
+  return `剩余 ${left} 天`;
+}
+
+/** 把当前回看范围写成一份纯文本报告。 */
+export function progressReportText(
+  project: Project,
+  span: ProgressReportSpan,
+  window: ProgressReportWindow,
+  today: string,
+  personName: (personId: string | null) => string,
+): string {
+  const groups = progressReport(project, span, window);
+  const lines = [
+    "回看报告",
+    `项目：${project.name.trim() || "未命名项目"}`,
+    `完成度：${effectiveCompletion(project)}%`,
+    `范围：${window.from ?? "不限"} 至 ${window.to ?? "不限"}`,
+    `按：${reportSpanLabel(span)}`,
+    `截至：${today}`,
+    "",
+  ];
+  if (groups.length === 0) {
+    lines.push("这段时间里没有待办。");
+    return `${lines.join("\n")}\n`;
+  }
+  for (const group of groups) {
+    lines.push(group.label);
+    for (const entry of group.entries) {
+      const when = entry.block.due ? `${entry.block.date} → ${entry.block.due}` : entry.block.date;
+      const spanDays = scheduledDays(entry.block);
+      lines.push(`${entry.block.title}（${reportStatus(entry.block, today)}）`);
+      lines.push(`${entry.slot.label} · ${personName(entry.block.person_id)}`);
+      lines.push(when);
+      if (spanDays !== null) lines.push(`开始到期限 ${spanDays} 天`);
+      if (entry.block.note.trim()) lines.push(`备注：${entry.block.note.trim()}`);
+      lines.push("");
+    }
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function progressReportFileName(projectName: string, today: string): string {
+  const name = (projectName.trim() || "未命名项目").replace(/[\\/:*?"<>|\s]+/g, "") || "未命名项目";
+  return `${name}-回看-${today}.txt`;
 }
 
 export function progressReport(

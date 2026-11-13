@@ -252,6 +252,23 @@
   margin-bottom: 8px;
 }
 
+.task-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.task-fold {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #eee8e0;
+}
+
+.task-fold-label {
+  color: #6d645b;
+  font-size: 12px;
+}
+
 .task-hint {
   margin: 8px 0 0;
   color: #8a8176;
@@ -406,8 +423,9 @@
 
 .task-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 2px 8px;
+  align-items: center;
   width: 100%;
   margin-top: 8px;
   padding: 8px 10px;
@@ -416,7 +434,26 @@
   background: #fff;
   text-align: left;
   font: inherit;
+}
+
+.task-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -2px -2px -2px 0;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #6d645b;
   cursor: pointer;
+}
+
+.task-icon:hover,
+.task-icon[aria-pressed="true"] {
+  background: #e7f3f3;
+  color: #0f6e6e;
 }
 
 .task-row.is-selected {

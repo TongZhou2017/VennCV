@@ -1,6 +1,5 @@
 import type { ProgressBlock, ProgressSlot, Project } from "../types";
-import { blocksInSlot, houseBands, isBlockDone, remainingDays, slotColor } from "../domain/progress";
-import { taskMark } from "./taskStatus";
+import { blocksInSlot, houseBands, isBlockDone, remainingDays, scheduledDays, slotColor } from "../domain/progress";
 import { todayIsoDate } from "../domain/projectTime";
 import "./progress-mosaic.css";
 
@@ -13,13 +12,16 @@ function Stone(props: {
   onSelect?: (id: string) => void;
 }) {
   const open = !isBlockDone(props.block);
-  const left = open ? remainingDays(props.block, props.asOf) : null;
-  const mark = taskMark(props.block, props.asOf);
-  const tip = `${props.block.date} ${props.slot.label}：${props.block.title}${mark.tone === "done" ? "" : `，${mark.text}`}`;
+  const span = open ? scheduledDays(props.block) : null;
+  const late = open && (remainingDays(props.block, props.asOf) ?? 0) < 0;
+  const when = props.block.due ? `${props.block.date} → ${props.block.due}` : props.block.date;
+  const tip = open
+    ? `${when} ${props.slot.label}：${props.block.title}${span === null ? "" : `，开始到期限 ${span} 天`}${late ? "，已逾期" : ""}`
+    : `${when} ${props.slot.label}：${props.block.title}，已完成`;
   const className = [
     "progress-stone",
     open ? "is-open" : "",
-    left !== null && left < 0 ? "is-late" : "",
+    late ? "is-late" : "",
     props.selected ? "is-selected" : "",
   ]
     .filter(Boolean)
@@ -28,7 +30,7 @@ function Stone(props: {
   if (!props.interactive) {
     return (
       <span className={className} title={tip} style={style}>
-        {left === null ? null : left}
+        {span === null ? null : span}
       </span>
     );
   }
@@ -41,7 +43,7 @@ function Stone(props: {
       style={style}
       onClick={() => props.onSelect?.(props.block.id)}
     >
-      {left === null ? null : left}
+      {span === null ? null : span}
     </button>
   );
 }

@@ -141,7 +141,7 @@ pub struct ProgressSlot {
     pub color: Option<String>,
 }
 
-/// 某一天定下、限期内要做完的一件事。标成完成才计入进度。
+/// 从某一天开始、限期内要做完的一件事。标成完成才计入进度。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProgressBlock {
     pub id: String,
@@ -149,7 +149,7 @@ pub struct ProgressBlock {
     pub slot_id: String,
     #[serde(default)]
     pub title: String,
-    /// 定下这件事的日期。
+    /// 开始日期。
     #[serde(default)]
     pub date: String,
     /// 要在这一天之前做完。旧 JSON 缺省为无。
