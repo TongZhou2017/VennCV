@@ -22,6 +22,22 @@ import {
   VENN_CENTER_Y,
 } from "../domain/fieldVennLayout";
 import {
+  addProgressBlock as addProgressBlockToProject,
+  addProgressFigure as addProgressFigureToProject,
+  addProgressPart as addProgressPartToProject,
+  applyProgressTemplate,
+  effectiveCompletion,
+  hasProgressBlocks,
+  removeProgressBlock as removeProgressBlockFromProject,
+  removeProgressFigure as removeProgressFigureFromProject,
+  removeProgressSlot as removeProgressSlotFromProject,
+  resetProgressLayout as resetProgressLayoutOnProject,
+  setFigureShare as setFigureShareOnProject,
+  updateProgressBlock as updateProgressBlockOnProject,
+  updateProgressSlot as updateProgressSlotOnProject,
+  type ProgressSlotPatch,
+} from "../domain/progress";
+import {
   validateAndFixProjectPositions,
   validateAppDataPreserveUserLayout,
   validateProjectPositionsWithoutMutatingFields,
@@ -161,6 +177,8 @@ export interface AppState {
   settings: AppSettings;
 
   selectedProjectId: string | null;
+  /** 从总表或合作视图点开时，待办页展开这一条。 */
+  openedProgressBlockId: string | null;
   projectEditBuffer: Project | null;
   /** Shift+点击累加；用于批量隐藏、移入回收站等 */
   multiSelectedProjectIds: string[];
@@ -237,7 +255,7 @@ export interface AppState {
     opts?: { mutateFields?: boolean; skipLayoutValidate?: boolean },
   ) => void;
 
-  selectProject: (id: string | null, opts?: { additive?: boolean }) => void;
+  selectProject: (id: string | null, opts?: { additive?: boolean; blockId?: string }) => void;
   clearMultiProjectSelection: () => void;
   selectProjectsWithSameStatus: () => void;
   selectProjectsWithSameFieldSet: () => void;
@@ -300,6 +318,63 @@ export interface AppState {
     patch: Partial<Pick<ProjectAuthorship, "position" | "corresponding" | "credit_roles" | "primary" | "responsibility">>,
   ) => void;
   removeProjectAuthor: (projectId: string, personId: string) => void;
+  applyProgressTemplate: (projectId: string) => void;
+  updateProgressSlot: (projectId: string, slotId: string, patch: ProgressSlotPatch) => void;
+  addProgressFigure: (projectId: string) => void;
+  addProgressPart: (projectId: string, band: "method" | "poc" | "figure" | "paper") => void;
+  removeProgressFigure: (projectId: string, slotId: string) => void;
+  removeProgressSlot: (projectId: string, slotId: string) => void;
+  resetProgressLayout: (projectId: string, field: "share" | "color") => void;
+  setFigureShare: (projectId: string, share: number | null) => void;
+  addProgressBlock: (
+    projectId: string,
+    slotId: string,
+    title: string,
+    date: string,
+    due: string,
+    personId: string | null,
+  ) => void;
+  updateProgressBlock: (
+    projectId: string,
+    blockId: string,
+    patch: {
+      title?: string;
+      date?: string;
+      due?: string | null;
+      completed_on?: string | null;
+      person_id?: string | null;
+      note?: string;
+      slot_id?: string;
+    },
+  ) => void;
+  removeProgressBlock: (projectId: string, blockId: string) => void;
+}
+
+function writeProjectProgress(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  projectId: string,
+  produce: (project: Project) => Project,
+) {
+  const next = cloneAppData(get().data);
+  const current = next.projects[projectId];
+  if (!current) return;
+  const updated = produce(current);
+  if (updated === current) return;
+  next.projects[projectId] = updated;
+  get().commitData(next, undefined, undefined, { skipLayoutValidate: true });
+  const saved = get().data.projects[projectId];
+  const buffer = get().projectEditBuffer;
+  if (!saved || !buffer || buffer.id !== projectId) return;
+  set({
+    projectEditBuffer: {
+      ...buffer,
+      completion_percentage: saved.completion_percentage,
+      progress_slots: saved.progress_slots,
+      progress_blocks: saved.progress_blocks,
+      figure_share: saved.figure_share,
+    },
+  });
 }
 
 function newProjectId(projects: Record<string, Project>): string {
@@ -327,6 +402,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   settings: defaultAppSettings(),
 
   selectedProjectId: null,
+  openedProgressBlockId: null,
   projectEditBuffer: null,
   multiSelectedProjectIds: [],
   relationDraftFromId: null,
@@ -466,6 +542,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       workspaceView: "venn",
       selectedPersonId: null,
       selectedProjectId: null,
+      openedProgressBlockId: null,
       projectEditBuffer: null,
       multiSelectedProjectIds: [],
       relationDraftFromId: null,
@@ -501,6 +578,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       data,
       ...orders,
       selectedProjectId: null,
+      openedProgressBlockId: null,
       projectEditBuffer: null,
       multiSelectedProjectIds: [],
       relationDraftFromId: null,
@@ -631,6 +709,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       projectOrder: mergeProjectOrder(projectOrder, data),
       projectEditBuffer: null,
       selectedProjectId: null,
+      openedProgressBlockId: null,
       multiSelectedProjectIds: [],
       relationDraftFromId: null,
     });
@@ -648,6 +727,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       projectOrder: mergeProjectOrder(projectOrder, data),
       projectEditBuffer: null,
       selectedProjectId: null,
+      openedProgressBlockId: null,
       multiSelectedProjectIds: [],
       relationDraftFromId: null,
     });
@@ -693,9 +773,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectProject: (id, opts) => {
     const { data } = get();
+    const openedProgressBlockId = opts?.blockId ?? null;
     if (!id) {
       set({
         selectedProjectId: null,
+        openedProgressBlockId: null,
         projectEditBuffer: null,
         multiSelectedProjectIds: [],
         relationDraftFromId: null,
@@ -711,6 +793,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (nextMulti.length === 0) {
         set({
           selectedProjectId: null,
+          openedProgressBlockId: null,
           projectEditBuffer: null,
           multiSelectedProjectIds: [],
           relationDraftFromId: null,
@@ -722,6 +805,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!pp) return;
       set({
         selectedProjectId: primary,
+        openedProgressBlockId: null,
         multiSelectedProjectIds: nextMulti,
         projectEditBuffer: { ...pp },
         relationDraftFromId: null,
@@ -730,6 +814,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({
       selectedProjectId: id,
+      openedProgressBlockId,
       multiSelectedProjectIds: [id],
       projectEditBuffer: { ...p },
       relationDraftFromId: null,
@@ -740,7 +825,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = get().selectedProjectId;
     const { data } = get();
     if (!id || !data.projects[id]) {
-      set({ multiSelectedProjectIds: [], selectedProjectId: null, projectEditBuffer: null });
+      set({ multiSelectedProjectIds: [], selectedProjectId: null, openedProgressBlockId: null, projectEditBuffer: null });
       return;
     }
     set({
@@ -905,7 +990,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       temp.projects[selectedProjectId] = { ...projectEditBuffer, id: selectedProjectId };
       position = calculateProjectPosition(temp, selectedProjectId);
     }
-    next.projects[selectedProjectId] = { ...projectEditBuffer, position };
+    const tracked = hasProgressBlocks(old);
+    next.projects[selectedProjectId] = {
+      ...projectEditBuffer,
+      position,
+      progress_slots: old.progress_slots ?? [],
+      progress_blocks: old.progress_blocks ?? [],
+      figure_share: old.figure_share,
+      completion_percentage: tracked ? effectiveCompletion(old) : projectEditBuffer.completion_percentage,
+    };
     const merged = next.projects[selectedProjectId]!;
     const posEq =
       Math.abs(old.position[0] - merged.position[0]) < 1e-4 &&
@@ -930,6 +1023,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       data,
       ...orders,
       selectedProjectId: null,
+      openedProgressBlockId: null,
       projectEditBuffer: null,
       multiSelectedProjectIds: [],
       relationDraftFromId: null,
@@ -1414,6 +1508,52 @@ export const useAppStore = create<AppState>((set, get) => ({
       (link) => !(link.project_id === projectId && link.person_id === personId),
     );
     get().commitData(next);
+  },
+
+  applyProgressTemplate: (projectId) => {
+    writeProjectProgress(get, set, projectId, (project) => applyProgressTemplate(project));
+  },
+
+  updateProgressSlot: (projectId, slotId, patch) => {
+    writeProjectProgress(get, set, projectId, (project) => updateProgressSlotOnProject(project, slotId, patch));
+  },
+
+  addProgressFigure: (projectId) => {
+    writeProjectProgress(get, set, projectId, (project) => addProgressFigureToProject(project));
+  },
+
+  addProgressPart: (projectId, band) => {
+    writeProjectProgress(get, set, projectId, (project) => addProgressPartToProject(project, band));
+  },
+
+  removeProgressFigure: (projectId, slotId) => {
+    writeProjectProgress(get, set, projectId, (project) => removeProgressFigureFromProject(project, slotId));
+  },
+
+  removeProgressSlot: (projectId, slotId) => {
+    writeProjectProgress(get, set, projectId, (project) => removeProgressSlotFromProject(project, slotId));
+  },
+
+  resetProgressLayout: (projectId, field) => {
+    writeProjectProgress(get, set, projectId, (project) => resetProgressLayoutOnProject(project, field));
+  },
+
+  setFigureShare: (projectId, share) => {
+    writeProjectProgress(get, set, projectId, (project) => setFigureShareOnProject(project, share));
+  },
+
+  addProgressBlock: (projectId, slotId, title, date, due, personId) => {
+    writeProjectProgress(get, set, projectId, (project) =>
+      addProgressBlockToProject(project, slotId, title, date, due, personId),
+    );
+  },
+
+  updateProgressBlock: (projectId, blockId, patch) => {
+    writeProjectProgress(get, set, projectId, (project) => updateProgressBlockOnProject(project, blockId, patch));
+  },
+
+  removeProgressBlock: (projectId, blockId) => {
+    writeProjectProgress(get, set, projectId, (project) => removeProgressBlockFromProject(project, blockId));
   },
 }));
 

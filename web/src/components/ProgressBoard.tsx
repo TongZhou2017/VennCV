@@ -1,0 +1,74 @@
+import { useAppStore } from "../store/appStore";
+import type { ProgressBlock, Project } from "../types";
+import { blocksOf, effectiveCompletion, isBlockDone, remainingDays, slotsOf } from "../domain/progress";
+import { todayIsoDate } from "../domain/projectTime";
+import { taskMark, toneClass } from "./taskStatus";
+
+function compareBlocks(a: ProgressBlock, b: ProgressBlock, today: string): number {
+  const openRank = (block: ProgressBlock) => (isBlockDone(block) ? 1 : 0);
+  const byOpen = openRank(a) - openRank(b);
+  if (byOpen !== 0) return byOpen;
+  if (!isBlockDone(a) && !isBlockDone(b)) {
+    const leftA = remainingDays(a, today) ?? Number.POSITIVE_INFINITY;
+    const leftB = remainingDays(b, today) ?? Number.POSITIVE_INFINITY;
+    if (leftA !== leftB) return leftA - leftB;
+  }
+  return b.date.localeCompare(a.date) || a.id.localeCompare(b.id);
+}
+
+export function ProgressBoard(props: { projectIds: string[]; mode: "all" | "selection" }) {
+  const projects = useAppStore((s) => s.data.projects);
+  const people = useAppStore((s) => s.data.people);
+  const selectProject = useAppStore((s) => s.selectProject);
+  const today = todayIsoDate();
+  const rows = props.projectIds
+    .map((id) => projects[id])
+    .filter((project): project is Project => Boolean(project))
+    .map((project) => ({
+      project,
+      blocks: blocksOf(project)
+        .filter((block) => slotsOf(project).some((slot) => slot.id === block.slot_id))
+        .sort((a, b) => compareBlocks(a, b, today)),
+    }))
+    .filter((row) => props.mode === "selection" || row.blocks.length > 0);
+
+  const hint =
+    props.mode === "selection"
+      ? `选中了 ${props.projectIds.length} 个项目，下面是它们的待办。点一条就打开那个项目。`
+      : "没有选中项目，下面是全部待办。点一条就打开那个项目。";
+
+  return (
+    <div className="task-page">
+      <section className="task-card">
+        <h3>待办</h3>
+        <p className="task-hint">{hint}</p>
+        {rows.length === 0 ? <p className="task-hint">还没有待办。</p> : null}
+        {rows.map(({ project, blocks }) => (
+          <div key={project.id} className="task-group">
+            <h4>{`${project.name.trim() || "未命名项目"} · ${effectiveCompletion(project)}%`}</h4>
+            {blocks.length === 0 ? <p className="task-hint">还没有待办。</p> : null}
+            {blocks.map((block) => {
+              const slot = slotsOf(project).find((item) => item.id === block.slot_id);
+              const person = block.person_id ? people[block.person_id] : null;
+              const mark = taskMark(block, today);
+              const when = block.due ? `${block.date} → ${block.due}` : block.date;
+              return (
+                <button
+                  key={block.id}
+                  type="button"
+                  className="task-row"
+                  onClick={() => selectProject(project.id, { blockId: block.id })}
+                >
+                  <span className="task-row-title">{block.title}</span>
+                  <span className={`task-badge ${toneClass(mark.tone)}`}>{mark.text}</span>
+                  <span className="task-row-meta">{`${slot?.label ?? "未分区"} · ${person?.name || "未指定"}`}</span>
+                  <span className="task-row-meta">{when}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}

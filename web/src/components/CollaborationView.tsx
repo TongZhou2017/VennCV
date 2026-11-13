@@ -1,16 +1,33 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store/appStore";
 import { buildCollaborationLayout } from "../domain/authors";
+import { blocksForPerson, type PersonProgress } from "../domain/progress";
+import { todayIsoDate } from "../domain/projectTime";
+import { taskMark } from "./taskStatus";
 import "./collaboration.css";
 
 const NODE_R = 22;
+
+function tasksByProject(rows: PersonProgress[]): PersonProgress[][] {
+  const groups = new Map<string, PersonProgress[]>();
+  for (const row of rows) {
+    const list = groups.get(row.projectId);
+    if (list) list.push(row);
+    else groups.set(row.projectId, [row]);
+  }
+  return [...groups.values()];
+}
 
 export function CollaborationView() {
   const data = useAppStore((s) => s.data);
   const selectedPersonId = useAppStore((s) => s.selectedPersonId);
   const selectPerson = useAppStore((s) => s.selectPerson);
+  const selectProject = useAppStore((s) => s.selectProject);
   const model = useMemo(() => buildCollaborationLayout(data), [data]);
-
+  const todos = useMemo(
+    () => (selectedPersonId ? blocksForPerson(data.projects, selectedPersonId) : []),
+    [data.projects, selectedPersonId],
+  );
   if (model.nodes.length === 0) {
     return (
       <div className="collab-page">
@@ -35,8 +52,48 @@ export function CollaborationView() {
     labs.set(node.labId ?? "", { name: node.labName, color: node.color });
   }
 
+  const taskPanel = (
+    <aside className="collab-tasks" aria-label="进展">
+      <h2>进展</h2>
+      {!selectedPersonId ? (
+        <p className="collab-empty">点一个人物，查看他记下的进展。</p>
+      ) : todos.length === 0 ? (
+        <p className="collab-empty">这个人还没有记下的进展</p>
+      ) : (
+        tasksByProject(todos).map((group) => {
+          const first = group[0];
+          if (!first) return null;
+          return (
+            <section key={first.projectId} className="collab-task-project">
+              <h3>
+                {first.projectName}
+                <span>{`${Math.round(first.completion)}%`}</span>
+              </h3>
+              {group.map((task) => {
+                const mark = taskMark({ completed_on: task.completedOn, due: task.due }, todayIsoDate());
+                return (
+                  <button
+                    key={task.blockId}
+                    type="button"
+                    className="collab-task"
+                    onClick={() => selectProject(task.projectId, { blockId: task.blockId })}
+                  >
+                    <span>{task.title}</span>
+                    <span>{task.slotLabel}</span>
+                    <span>{mark.text}</span>
+                  </button>
+                );
+              })}
+            </section>
+          );
+        })
+      )}
+    </aside>
+  );
+
   return (
     <div className="collab-page">
+      <div className="collab-board">
       <div className="collab-legend">
         {[...labs.entries()].map(([id, lab]) => (
           <span key={id || "none"} className="collab-legend-item">
@@ -87,6 +144,8 @@ export function CollaborationView() {
           );
         })}
       </svg>
+      </div>
+      {taskPanel}
     </div>
   );
 }

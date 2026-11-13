@@ -11,6 +11,7 @@ import {
   sortProjectAuthors,
   type AuthorTableSort,
 } from "../domain/authors";
+import { effectiveCompletion } from "../domain/progress";
 
 function labNames(labIds: string[], labs: { [id: string]: { name: string } | undefined }): string {
   const names = labIds.map((id) => labs[id]?.name).filter((name): name is string => Boolean(name));
@@ -286,7 +287,7 @@ export function AuthorPanel() {
                 >
                   <span>{project.name}</span>
                   <span style={{ color: meta.fill === "#ffffff" ? "#333" : meta.fill }}>{meta.label}</span>
-                  <span>{Math.round(project.completion_percentage)}%</span>
+                  <span>{Math.round(effectiveCompletion(project))}%</span>
                   {link.responsibility ? <span>{link.responsibility}</span> : null}
                 </button>
               );

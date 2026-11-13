@@ -1,0 +1,130 @@
+.progress-house {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  background: #f6f3ef;
+  border: 1px solid #e4ddd4;
+  border-radius: 8px;
+}
+
+.progress-house-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.progress-house-row[data-band="method"] {
+  background: #fdecea;
+}
+
+.progress-house-row[data-band="poc"] {
+  background: #fff6e0;
+}
+
+.progress-house-row[data-band="paper"] {
+  background: #e7f1fb;
+}
+
+.progress-house-label {
+  width: 72px;
+  flex: none;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.progress-house-stones,
+.progress-house-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.progress-house-stack {
+  flex-direction: column-reverse;
+  flex-wrap: nowrap;
+  min-height: 14px;
+}
+
+.progress-house-figures {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px;
+  background: #e8f5e9;
+  border-radius: 4px;
+}
+
+.progress-house-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 28px;
+}
+
+.progress-house-theme {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  line-height: 1.2;
+  max-height: 64px;
+  overflow: hidden;
+}
+
+.progress-stone {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  display: inline-block;
+  box-sizing: border-box;
+  font-size: 9px;
+  line-height: 12px;
+  text-align: center;
+}
+
+.progress-stone.is-open {
+  width: auto;
+  min-width: 18px;
+  padding: 0 2px;
+  background: #d0d0d0;
+  color: #222;
+}
+
+.progress-stone.is-open.is-late {
+  color: #9a3412;
+}
+
+button.progress-stone {
+  padding: 0;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+button.progress-stone.is-selected,
+button.progress-stone:focus-visible {
+  outline: 2px solid #222;
+}
+
+.progress-house.is-compact .progress-stone {
+  width: 11px;
+  height: 11px;
+  font-size: 8px;
+  line-height: 10px;
+}
+
+.progress-house.is-compact .progress-stone.is-open {
+  width: auto;
+  min-width: 14px;
+}
+
+.progress-house.is-compact .progress-house-label {
+  width: 64px;
+  font-size: 10px;
+}
+
+.timeline-tracks .progress-house {
+  margin-bottom: 4px;
+}

@@ -14,6 +14,7 @@ import {
   type VizLayout,
 } from "../viz/layout";
 import { projectAuthorSatellites } from "../domain/authors";
+import { effectiveCompletion } from "../domain/progress";
 
 function clientToSvgCoords(
   svg: SVGSVGElement,
@@ -358,7 +359,7 @@ export function VisualizationSvg({
           const inMulti = multiSelectedProjectIds.includes(proj.id);
           const cx = dragPos?.id === proj.id ? dragPos.cx : sx;
           const cy = dragPos?.id === proj.id ? dragPos.cy : sy;
-          const completionStroke = completionPercentageToCss(proj.completion_percentage);
+          const completionStroke = completionPercentageToCss(effectiveCompletion(proj));
           return (
             <g key={proj.id}>
               {inMulti ? (

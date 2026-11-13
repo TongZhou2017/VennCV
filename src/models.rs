@@ -103,6 +103,65 @@ pub struct Project {
     /// 按期刊或预印本分开的投递。旧 JSON 缺省为空。
     #[serde(default)]
     pub journal_submissions: Vec<JournalSubmission>,
+    /// 进度楼的格子。旧 JSON 缺省为空。
+    #[serde(default)]
+    pub progress_slots: Vec<ProgressSlot>,
+    /// 格子里的方块。旧 JSON 缺省为空。
+    #[serde(default)]
+    pub progress_blocks: Vec<ProgressBlock>,
+    /// 主图这一层铺满时一共占的完成度。缺省为 30，由各张主图平分。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub figure_share: Option<f64>,
+}
+
+/// 进度楼的一层：方法、POC、主图或论文。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgressBand {
+    Method,
+    Poc,
+    Figure,
+    Paper,
+}
+
+/// 方法、POC、一张主图或论文中的一格。主图的 `label` 是主题。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProgressSlot {
+    pub id: String,
+    pub band: ProgressBand,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub order: u32,
+    /// 这一格铺满时占的完成度。缺省时由示例比例决定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<f64>,
+    /// 这一格的颜色。缺省时跟所属层。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+/// 某一天定下、限期内要做完的一件事。标成完成才计入进度。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProgressBlock {
+    pub id: String,
+    #[serde(default)]
+    pub slot_id: String,
+    #[serde(default)]
+    pub title: String,
+    /// 定下这件事的日期。
+    #[serde(default)]
+    pub date: String,
+    /// 要在这一天之前做完。旧 JSON 缺省为无。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due: Option<String>,
+    /// 标记完成的日期。缺省为无，表示还没完成。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_on: Option<String>,
+    #[serde(default)]
+    pub person_id: Option<String>,
+    #[serde(default)]
+    pub note: String,
 }
 
 /// 作者角色。旧数据缺省为其他。
@@ -393,6 +452,9 @@ impl Default for AppData {
             expected_journal: None,
             submission_milestones: Vec::new(),
             journal_submissions: Vec::new(),
+            progress_slots: Vec::new(),
+            progress_blocks: Vec::new(),
+            figure_share: None,
         });
 
         projects.insert("project_2".to_string(), Project {
@@ -408,6 +470,9 @@ impl Default for AppData {
             expected_journal: None,
             submission_milestones: Vec::new(),
             journal_submissions: Vec::new(),
+            progress_slots: Vec::new(),
+            progress_blocks: Vec::new(),
+            figure_share: None,
         });
 
         // 添加关系
@@ -483,6 +548,9 @@ mod tests {
             expected_journal: None,
             submission_milestones: Vec::new(),
             journal_submissions: Vec::new(),
+            progress_slots: Vec::new(),
+            progress_blocks: Vec::new(),
+            figure_share: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Project = serde_json::from_str(&json).unwrap();
@@ -498,6 +566,8 @@ mod tests {
         let p: Project = serde_json::from_str(json).unwrap();
         assert!(p.expected_completion_date.is_none());
         assert!(p.submission_milestones.is_empty());
+        assert!(p.progress_slots.is_empty());
+        assert!(p.progress_blocks.is_empty());
     }
 
     #[test]

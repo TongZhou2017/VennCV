@@ -1,7 +1,7 @@
 {
   "name": "venncv",
   "private": true,
-  "version": "0.7.3",
+  "version": "0.8.8",
   "scripts": {
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

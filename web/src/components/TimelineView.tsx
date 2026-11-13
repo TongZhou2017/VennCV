@@ -2,9 +2,18 @@ import { useMemo } from "react";
 import { useAppStore } from "../store/appStore";
 import { projectStatusVisual } from "../types";
 import { buildTimelineModel, timelineAxisTicks, timelineDateRatio } from "../domain/timeline";
+import { projectThroughDate } from "../domain/progress";
+import { ProgressMosaic } from "./ProgressMosaic";
 import "./timeline.css";
 
 const TRACK_PAD = 28;
+const PROGRESS_PLOT_TOP = 10;
+const PROGRESS_PLOT_HEIGHT = 72;
+const PROGRESS_DOT = 14;
+
+function progressDotTop(level: number): number {
+  return PROGRESS_PLOT_TOP + ((100 - level) / 100) * PROGRESS_PLOT_HEIGHT - PROGRESS_DOT / 2;
+}
 
 export function TimelineView() {
   const projects = useAppStore((s) => s.data.projects);
@@ -36,16 +45,19 @@ export function TimelineView() {
           <p className="timeline-empty">横轴上还没有日期。没有填写时间的项目列在下方。</p>
         ) : (
           <div className="timeline-board">
-            <div className="timeline-axis">
-              {ticks.map((tick) => (
-                <span key={tick} className="timeline-tick" style={{ left: pointLeft(tick) }}>
-                  {tick}
-                </span>
-              ))}
-            </div>
+            {ticks.length > 0 ? (
+              <div className="timeline-axis">
+                {ticks.map((tick) => (
+                  <span key={tick} className="timeline-tick" style={{ left: pointLeft(tick) }}>
+                    {tick}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {model.lanes.map((lane) => {
               const visual = projectStatusVisual(lane.status);
               const selected = lane.projectId === selectedProjectId;
+              const project = projects[lane.projectId];
               return (
                 <button
                   key={lane.projectId}
@@ -63,7 +75,60 @@ export function TimelineView() {
                     </span>
                   </span>
                   <span className="timeline-tracks">
-                    {lane.tracks.map((track) => (
+                    {lane.tracks.map((track) =>
+                      track.progress && project ? (
+                        <span key={track.key} className="timeline-track is-progress">
+                          <span className="timeline-progress-plot">
+                            <span className="timeline-track-label">总完成度</span>
+                            <svg
+                              className="timeline-progress-svg"
+                              viewBox="0 0 100 100"
+                              preserveAspectRatio="none"
+                              aria-hidden="true"
+                            >
+                              {track.points.length > 1 ? (
+                                <polyline
+                                  points={track.points
+                                    .map((point) => {
+                                      const x =
+                                        timelineDateRatio(point.date, minDate ?? point.date, maxDate ?? point.date) * 100;
+                                      return `${x},${100 - (point.level ?? 0)}`;
+                                    })
+                                    .join(" ")}
+                                  fill="none"
+                                  stroke="#8d8680"
+                                  strokeWidth="1.5"
+                                  vectorEffect="non-scaling-stroke"
+                                />
+                              ) : null}
+                            </svg>
+                            {track.points.map((point) => (
+                              <span
+                                key={point.key}
+                                className="timeline-point is-progress"
+                                style={{ left: pointLeft(point.date), top: `${progressDotTop(point.level ?? 0)}px` }}
+                              >
+                                <span
+                                  className="timeline-dot"
+                                  style={{
+                                    background: visual.fill,
+                                    borderColor: visual.text === "#fff" ? visual.fill : "#333",
+                                  }}
+                                />
+                                <span className="timeline-point-title">{point.title}</span>
+                                <span className="timeline-progress-hover" aria-hidden="true">
+                                  <ProgressMosaic
+                                    project={projectThroughDate(project, point.date)}
+                                    asOf={point.date}
+                                    compact
+                                  />
+                                  {point.detail ? <span className="timeline-progress-hover-note">{point.detail}</span> : null}
+                                </span>
+                              </span>
+                            ))}
+                          </span>
+                        </span>
+                      ) : (
                       <span key={track.key} className="timeline-track">
                         {track.label === "预期完成" ? null : (
                           <span className="timeline-track-label">
@@ -108,7 +173,8 @@ export function TimelineView() {
                           </span>
                         ))}
                       </span>
-                    ))}
+                      )
+                    )}
                   </span>
                 </button>
               );

@@ -10,6 +10,7 @@ import type {
   ProjectStatus,
 } from "../types";
 import { coerceAuthorRole, coerceProjectStatus } from "../types";
+import { effectiveCompletion } from "./progress";
 
 export const LAB_COLOR_PALETTE = ["#5c6bc0", "#00897b", "#8e24aa", "#ef6c00", "#c62828", "#1565c0"];
 export const UNASSIGNED_LAB_COLOR = "#9e9e9e";
@@ -331,7 +332,7 @@ export function personProjectProgress(data: AppDataJson, personId: string): Pers
       projectId: project.id,
       name: project.name,
       status: coerceProjectStatus(project.status),
-      completion: project.completion_percentage,
+      completion: effectiveCompletion(project),
       responsibility: link.responsibility,
     });
   }

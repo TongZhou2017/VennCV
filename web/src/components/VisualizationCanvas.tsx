@@ -13,6 +13,7 @@ import { measureCanvasHost } from "../viz/measureHost";
 import { getKonvaStagePixelRatio } from "../viz/stagePixelRatio";
 import { computeProjectNameLabelOffsets } from "../viz/projectLabelLayout";
 import { projectAuthorSatellites } from "../domain/authors";
+import { effectiveCompletion } from "../domain/progress";
 import { LS_FORCE_CANVAS_PR1, LS_SVG_VIZ } from "../storage/uiPrefs";
 
 export function VisualizationCanvas() {
@@ -459,7 +460,7 @@ export function VisualizationCanvas() {
             const strokeW = settings.project_border_width;
             const sel = selectedProjectId === proj.id;
             const inMulti = multiSelectedProjectIds.includes(proj.id);
-            const completionStroke = completionPercentageToCss(proj.completion_percentage);
+            const completionStroke = completionPercentageToCss(effectiveCompletion(proj));
             return (
               <Group
                 key={proj.id}

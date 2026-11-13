@@ -6,6 +6,7 @@ import {
   coerceRelationType,
 } from "../types";
 import { sanitizeAuthorsInPlace } from "./authors";
+import { sanitizeProjectProgress } from "./progress";
 import { sanitizeProjectTimes } from "./projectTime";
 
 export const DEFAULT_RELATION_COLOR: [number, number, number, number] = [0, 0, 0, 255];
@@ -56,6 +57,14 @@ function sanitizeProjectStatuses(projects: Record<string, Project>): void {
   }
 }
 
+function sanitizeProgressEverywhere(data: AppDataJson): void {
+  const people = data.people ?? {};
+  for (const project of Object.values(data.projects)) sanitizeProjectProgress(project, people);
+  if (data.deleted_projects && typeof data.deleted_projects === "object") {
+    for (const project of Object.values(data.deleted_projects)) sanitizeProjectProgress(project, people);
+  }
+}
+
 function sanitizeRelationTypes(data: AppDataJson): void {
   for (const r of data.relations) {
     r.relation_type = coerceRelationType(r.relation_type);
@@ -74,6 +83,7 @@ export function sanitizeAppDataInPlace(d: AppDataJson): void {
   sanitizeProjectTimes(d.projects);
   sanitizeRelationTypes(d);
   sanitizeAuthorsInPlace(d);
+  sanitizeProgressEverywhere(d);
   if (d.deleted_projects && typeof d.deleted_projects === "object") {
     sanitizeProjectCompletion(d.deleted_projects);
     sanitizeProjectStatuses(d.deleted_projects);
@@ -95,6 +105,7 @@ export function cloneAppData(d: AppDataJson): AppDataJson {
   sanitizeProjectTimes(copy.projects);
   sanitizeRelationTypes(copy);
   sanitizeAuthorsInPlace(copy);
+  sanitizeProgressEverywhere(copy);
   return copy;
 }
 
@@ -134,6 +145,7 @@ export function normalizeAppData(raw: unknown): AppDataJson {
     authorships: j.authorships ?? [],
   };
   sanitizeAuthorsInPlace(data);
+  sanitizeProgressEverywhere(data);
   return data;
 }
 

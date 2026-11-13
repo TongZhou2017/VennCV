@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAppStore } from "../store/appStore";
 import type { ProjectStatus, RelationType } from "../types";
 import { PROJECT_STATUS_META, coerceProjectStatus, rgbaToCss } from "../types";
+import { effectiveCompletion, hasProgressBlocks } from "../domain/progress";
 import { ProjectTimeFields } from "./ProjectTimeFields";
 import { AuthorPanel } from "./AuthorPanel";
+import { ProgressEditor } from "./ProgressEditor";
+import { ProgressBoard } from "./ProgressBoard";
+import { FigurePlan } from "./FigurePlan";
 import "./property-panel.css";
 
 const STATUSES: ProjectStatus[] = [
@@ -14,14 +18,16 @@ const STATUSES: ProjectStatus[] = [
   "ToBeStarted",
 ];
 
-type PropertyTab = "properties" | "publication" | "authors";
+type PropertyTab = "properties" | "tasks" | "publication" | "authors";
 
-const PROPERTY_TABS: PropertyTab[] = ["properties", "publication", "authors"];
+const PROPERTY_TABS: PropertyTab[] = ["properties", "tasks", "publication", "authors"];
 
 function propertyTabLabel(tab: PropertyTab): string {
   switch (tab) {
     case "properties":
       return "属性";
+    case "tasks":
+      return "待办事项";
     case "publication":
       return "发表";
     case "authors":
@@ -126,6 +132,7 @@ export function PropertyPanel() {
   const data = useAppStore((s) => s.data);
   const projectOrder = useAppStore((s) => s.projectOrder);
   const selectedProjectId = useAppStore((s) => s.selectedProjectId);
+  const multiSelectedProjectIds = useAppStore((s) => s.multiSelectedProjectIds);
   const projectEditBuffer = useAppStore((s) => s.projectEditBuffer);
   const setProjectEditBuffer = useAppStore((s) => s.setProjectEditBuffer);
   const createRelation = useAppStore((s) => s.createRelation);
@@ -176,17 +183,33 @@ export function PropertyPanel() {
     return projectOrder.filter((id) => id !== selectedProjectId && data.projects[id]);
   }, [data.projects, projectOrder, selectedProjectId]);
 
+  const crossProjectIds = useMemo(() => {
+    const live = projectOrder.filter((id) => data.projects[id]);
+    const multi = multiSelectedProjectIds.filter((id) => data.projects[id]);
+    if (selectedProjectId && multi.length <= 1) return null;
+    const allow = multi.length > 1 ? new Set(multi) : null;
+    const ordered = live.filter((id) => !allow || allow.has(id));
+    if (!allow) return ordered;
+    return [...ordered, ...multi.filter((id) => !ordered.includes(id))];
+  }, [data.projects, multiSelectedProjectIds, projectOrder, selectedProjectId]);
+
+  const taskCount = (ids: string[]) =>
+    ids.reduce((sum, id) => sum + (data.projects[id]?.progress_blocks?.length ?? 0), 0);
+
   if (!selectedProjectId || !projectEditBuffer) {
+    const ids = crossProjectIds ?? projectOrder.filter((id) => data.projects[id]);
     return (
       <PanelFrame
         tab={tab}
-        counts={{ properties: 0, publication: 0, authors: 0 }}
+        counts={{ properties: 0, tasks: taskCount(ids), publication: 0, authors: 0 }}
         onTab={setTab}
       >
         {(() => {
           switch (tab) {
             case "authors":
               return <AuthorPanel />;
+            case "tasks":
+              return <ProgressBoard projectIds={ids} mode="all" />;
             case "properties":
             case "publication":
               return <p className="property-empty">选中画布或列表中的项目以编辑属性</p>;
@@ -204,6 +227,7 @@ export function PropertyPanel() {
   const fieldIds = Object.keys(data.fields);
   const counts: Record<PropertyTab, number> = {
     properties: relatedRelations.length,
+    tasks: crossProjectIds ? taskCount(crossProjectIds) : (data.projects[selectedProjectId]?.progress_blocks?.length ?? 0),
     publication: buf.journal_submissions?.length ?? 0,
     authors: data.authorships.filter((link) => link.project_id === selectedProjectId).length,
   };
@@ -255,19 +279,34 @@ export function PropertyPanel() {
               ))}
             </select>
             <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>完成度 %</label>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={Number.isFinite(buf.completion_percentage) ? buf.completion_percentage : 0}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                if (!Number.isFinite(n)) return;
-                update({ completion_percentage: Math.max(0, Math.min(100, n)) });
-              }}
-              style={{ width: "100%", padding: 6, marginBottom: 4 }}
-            />
-            <p className="property-note">100% 表示开始投稿。</p>
+            {(() => {
+              const live = data.projects[selectedProjectId] ?? buf;
+              const tracked = hasProgressBlocks(live);
+              const shown = tracked ? effectiveCompletion(live) : buf.completion_percentage;
+              return (
+                <>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    readOnly={tracked}
+                    value={Number.isFinite(shown) ? shown : 0}
+                    onChange={(e) => {
+                      if (tracked) return;
+                      const n = Number(e.target.value);
+                      if (!Number.isFinite(n)) return;
+                      update({ completion_percentage: Math.max(0, Math.min(100, n)) });
+                    }}
+                    style={{ width: "100%", padding: 6, marginBottom: 4 }}
+                  />
+                  <p className="property-note">
+                    {tracked
+                      ? "完成度只累计已经标成完成的待办，最高 100%。100% 表示开始投稿。"
+                      : "100% 表示开始投稿。具体事项写在「待办事项」。"}
+                  </p>
+                </>
+              );
+            })()}
             <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <input
                 type="checkbox"
@@ -437,8 +476,19 @@ export function PropertyPanel() {
             </div>
           </>
         );
+      case "tasks":
+        return crossProjectIds ? (
+          <ProgressBoard projectIds={crossProjectIds} mode="selection" />
+        ) : (
+          <ProgressEditor key={selectedProjectId} projectId={selectedProjectId} />
+        );
       case "publication":
-        return <ProjectTimeFields project={buf} onChange={update} />;
+        return (
+          <>
+            <FigurePlan projectId={selectedProjectId} />
+            <ProjectTimeFields project={buf} onChange={update} />
+          </>
+        );
       case "authors":
         return <AuthorPanel />;
       default: {

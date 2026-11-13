@@ -147,6 +147,57 @@ export interface Project {
   journal_submissions?: JournalSubmission[];
   /** 为 true 时画布不绘制该项目圆与名称；侧栏仍列出，便于批量管理 */
   canvas_hidden?: boolean;
+  /**
+   * 进度楼的格子。从下往上是方法、POC、主图、论文。
+   * 每个项目可以改主图数量和每张主图的主题。旧工作区缺省为空。
+   */
+  progress_slots?: ProgressSlot[];
+  /**
+   * 待办。某一天定下，并约定在某一天之前做完。
+   * 标成完成之后才计入进度，最高 100。100% 表示开始投稿。
+   * 旧工作区缺省为空。
+   */
+  progress_blocks?: ProgressBlock[];
+  /**
+   * 主图这一层铺满时一共占的完成度，由各张主图平分。
+   * 缺省为 30。旧工作区没有这一项。
+   */
+  figure_share?: number;
+}
+
+export type ProgressBand = "method" | "poc" | "figure" | "paper";
+
+/** 方法、POC、一张主图或论文中的一格。主图的 `label` 是主题。 */
+export interface ProgressSlot {
+  id: string;
+  band: ProgressBand;
+  label: string;
+  order: number;
+  /**
+   * 这一格铺满时占的完成度。缺省时沿用示例比例。
+   * 旧工作区没有这一项。
+   */
+  share?: number;
+  /** 这一格的颜色。缺省时跟所属层。旧工作区没有这一项。 */
+  color?: string;
+}
+
+/** 某一天定下、限期内要做完的一件事。 */
+export interface ProgressBlock {
+  id: string;
+  slot_id: string;
+  title: string;
+  /** 定下这件事的日期 `YYYY-MM-DD`。 */
+  date: string;
+  /** 要在这一天之前做完。旧数据没有这一项。 */
+  due?: string | null;
+  /**
+   * 标记完成的日期。没有则还没完成，不计进度，摘要图上是灰色块。
+   * 旧数据没有这一项时，读入后算在定下那天完成。
+   */
+  completed_on?: string | null;
+  person_id: string | null;
+  note: string;
 }
 
 export interface ProjectRelation {

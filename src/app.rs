@@ -2211,6 +2211,9 @@ impl VennCVApp {
             expected_journal: None,
             submission_milestones: Vec::new(),
             journal_submissions: Vec::new(),
+            progress_slots: Vec::new(),
+            progress_blocks: Vec::new(),
+            figure_share: None,
         };
         // 先调整领域布局
         self.adjust_field_layout();
