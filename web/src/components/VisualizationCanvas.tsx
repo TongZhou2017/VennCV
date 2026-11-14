@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import type Konva from "konva";
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from "react-konva";
 import { useAppStore } from "../store/appStore";
 import { PROJECT_STATUS_META, projectStatusVisual, rgbaToCss } from "../types";
@@ -9,16 +10,38 @@ import {
 } from "../viz/completionColor";
 import { computeVizLayout, dataToScreen, hitTestProjectScreen, screenToData } from "../viz/layout";
 import { VisualizationSvg } from "./VisualizationSvg";
+import { VennContextMenu } from "./VennContextMenu";
+import {
+  blobFromDataUrl,
+  copyImageToClipboard,
+  downloadBlob,
+  pngBlobFromSvg,
+  serializeSvg,
+  svgWrappingPng,
+} from "../viz/figureExport";
 import { measureCanvasHost } from "../viz/measureHost";
 import { getKonvaStagePixelRatio } from "../viz/stagePixelRatio";
-import { computeProjectNameLabelOffsets } from "../viz/projectLabelLayout";
+import { textWidth } from "../viz/projectLabelLayout";
+import { FIELD_LABEL_FONT, LEGEND_BOX, canvasChrome, clampLegendPosition, placeFieldLabels, placeLegend, placeProjectNames } from "../viz/sceneSpace";
+import {
+  relationLabelPoint,
+  SELECTION_RING,
+  positionsFromData,
+  useScenePose,
+  type SceneDragPhase,
+} from "../viz/sceneMotion";
 import { projectAuthorSatellites } from "../domain/authors";
 import { effectiveCompletion } from "../domain/progress";
-import { LS_FORCE_CANVAS_PR1, LS_SVG_VIZ } from "../storage/uiPrefs";
+import { LS_FORCE_CANVAS_PR1, LS_SVG_VIZ, readLegendPosFromStorage, writeLegendPosToStorage } from "../storage/uiPrefs";
 
 export function VisualizationCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<Konva.Stage | null>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [legendPos, setLegendPos] = useState<{ x: number; y: number } | null>(() => readLegendPosFromStorage());
+  const legendDragRef = useRef<{ x: number; y: number; ox: number; oy: number; last: { x: number; y: number } } | null>(null);
+  const legendLatchRef = useRef<{ key: string; at: { x: number; y: number } } | null>(null);
 
   const data = useAppStore((s) => s.data);
   const fieldOrder = useAppStore((s) => s.fieldOrder);
@@ -26,7 +49,6 @@ export function VisualizationCanvas() {
   const zoom = useAppStore((s) => s.visualizationZoom);
   const pan = useAppStore((s) => s.visualizationOffset);
   const setPan = useAppStore((s) => s.setVisualizationOffset);
-  const setProjectPosition = useAppStore((s) => s.setProjectPosition);
   const selectProject = useAppStore((s) => s.selectProject);
   const selectedProjectId = useAppStore((s) => s.selectedProjectId);
   const multiSelectedProjectIds = useAppStore((s) => s.multiSelectedProjectIds);
@@ -35,13 +57,20 @@ export function VisualizationCanvas() {
   const authorDisplay = useAppStore((s) => s.authorDisplay);
   const selectedPersonId = useAppStore((s) => s.selectedPersonId);
   const selectPerson = useAppStore((s) => s.selectPerson);
+  const showBannerNotice = useAppStore((s) => s.showBannerNotice);
+  const relayoutFieldsAsVenn = useAppStore((s) => s.relayoutFieldsAsVenn);
+  const selectProjectsWithSameStatus = useAppStore((s) => s.selectProjectsWithSameStatus);
+  const selectProjectsWithSameFieldSet = useAppStore((s) => s.selectProjectsWithSameFieldSet);
+  const selectProjectsWithSamePrefix = useAppStore((s) => s.selectProjectsWithSamePrefix);
+  const selectProjectsWithSameVennRelation = useAppStore((s) => s.selectProjectsWithSameVennRelation);
 
   const [wireEnd, setWireEnd] = useState<{ x: number; y: number } | null>(null);
   const [wireIndirectPreview, setWireIndirectPreview] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const setSettings = useAppStore((s) => s.setSettings);
 
-  const panRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const panRef = useRef<{ x: number; y: number; ox: number; oy: number; pointerId: number } | null>(null);
+  const [panning, setPanning] = useState(false);
 
   const applyHostSize = useCallback(() => {
     const el = containerRef.current;
@@ -146,13 +175,48 @@ export function VisualizationCanvas() {
     () => Object.values(data.projects).filter((p) => p.canvas_hidden !== true),
     [data.projects],
   );
-  const nameLabelDy = useMemo(
-    () =>
-      settings.show_project_names
-        ? computeProjectNameLabelOffsets(projectList, layout, zoom, pan)
-        : {},
-    [layout, pan, projectList, settings.show_project_names, zoom],
+  const settledDataRef = useRef<typeof data | null>(null);
+  const { pose, positionOf, beginDrag, moveDrag, endDrag, cancelDrag } = useScenePose(
+    data,
+    (id, pos) => {
+      const solved = useAppStore.getState().previewDrag(id, pos);
+      settledDataRef.current = solved;
+      return solved ? positionsFromData(solved) : positionsFromData(useAppStore.getState().data);
+    },
+    () => {
+      const solved = settledDataRef.current;
+      if (solved) useAppStore.getState().commitSettled(solved);
+    },
   );
+  const posedProjects = useMemo(
+    () =>
+      projectList.map((project) => {
+        const position = pose?.[project.id] ?? project.position;
+        if (position[0] === project.position[0] && position[1] === project.position[1]) return project;
+        return { ...project, position };
+      }),
+    [pose, projectList],
+  );
+  const onDragProject = useCallback((phase: SceneDragPhase, id: string, pos: [number, number]) => {
+    switch (phase) {
+      case "start":
+        beginDrag(id);
+        return;
+      case "move":
+        moveDrag(id, pos);
+        return;
+      case "end":
+        endDrag(id, pos);
+        return;
+      case "cancel":
+        cancelDrag();
+        return;
+      default: {
+        const unreachable: never = phase;
+        return unreachable;
+      }
+    }
+  }, [beginDrag, cancelDrag, endDrag, moveDrag]);
 
   const bg = rgbaToCss(settings.visualization_bg_color);
 
@@ -169,15 +233,40 @@ export function VisualizationCanvas() {
   );
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => onPanMove(e.clientX, e.clientY);
-    const onUp = () => {
+    const endPan = (pointerId: number | null) => {
+      const current = panRef.current;
+      if (!current) return;
+      if (pointerId !== null && current.pointerId >= 0 && current.pointerId !== pointerId) return;
       panRef.current = null;
+      setPanning(false);
+      const host = containerRef.current;
+      if (!host || current.pointerId < 0) return;
+      try {
+        if (host.hasPointerCapture(current.pointerId)) host.releasePointerCapture(current.pointerId);
+      } catch {
+        // 松开时捕获可能已经结束。
+      }
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    const onMove = (event: PointerEvent) => {
+      const current = panRef.current;
+      if (!current || (current.pointerId >= 0 && event.pointerId !== current.pointerId)) return;
+      if ((event.buttons & 5) === 0) {
+        endPan(event.pointerId);
+        return;
+      }
+      onPanMove(event.clientX, event.clientY);
+    };
+    const onUp = (event: PointerEvent) => endPan(event.pointerId);
+    const onBlur = () => endPan(null);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("blur", onBlur);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("blur", onBlur);
     };
   }, [onPanMove]);
 
@@ -213,14 +302,196 @@ export function VisualizationCanvas() {
     return [...byOrder, ...extra];
   }, [data.fields, fieldOrder]);
 
+  const sceneLabels = useMemo(() => {
+    const projects = posedProjects.map((project) => {
+      const [x, y] = dataToScreen(project.position[0], project.position[1], layout, zoom, pan);
+      return {
+        id: project.id,
+        x,
+        y,
+        r: project.radius * layout.autoScale * zoom,
+        name: project.name,
+        fieldIds: project.field_ids,
+      };
+    });
+    const fields = fieldsToDraw.map((field) => {
+      const [x, y] = dataToScreen(field.position[0], field.position[1], layout, zoom, pan);
+      return { id: field.id, name: field.name, x, y, r: field.radius * layout.autoScale * zoom };
+    });
+    const fieldLabels = placeFieldLabels(fields);
+    const chrome = canvasChrome(size.w, size.h);
+    const latchKey = `${size.w}x${size.h}|${zoom}|${fields.map((field) => field.id).join(",")}`;
+    const autoLegend = () =>
+      placeLegend(
+        size.w,
+        size.h,
+        LEGEND_BOX.w,
+        LEGEND_BOX.h,
+        [
+          ...fields.map((field) => ({ x: field.x, y: field.y, r: field.r })),
+          ...projects.map((project) => ({ x: project.x, y: project.y, r: project.r })),
+          ...fieldLabels.map((label) => ({ x: label.x, y: label.y, r: 22 })),
+        ],
+        chrome,
+      );
+    let legendAt = legendPos
+      ? clampLegendPosition(legendPos.x, legendPos.y, size.w, size.h, LEGEND_BOX.w, LEGEND_BOX.h, chrome)
+      : legendLatchRef.current?.key === latchKey
+        ? legendLatchRef.current.at
+        : autoLegend();
+    if (!legendPos && legendLatchRef.current?.key !== latchKey) {
+      legendLatchRef.current = { key: latchKey, at: legendAt };
+    }
+    const obstacles = [
+      ...chrome,
+      ...fieldLabels.map((label) => {
+        const name = fields.find((field) => field.id === label.id)?.name ?? "";
+        const w = textWidth(name, FIELD_LABEL_FONT);
+        return { x: label.x - w / 2, y: label.y - 9, w, h: 18 };
+      }),
+      ...(settings.show_legend
+        ? [{ x: legendAt.x, y: legendAt.y, w: LEGEND_BOX.w, h: LEGEND_BOX.h }]
+        : []),
+    ];
+    const placed = new Map(projects.map((project) => [project.id, project]));
+    const arrows = data.relations.flatMap((rel) => {
+      const from = placed.get(rel.from_id);
+      const to = placed.get(rel.to_id);
+      if (!from || !to) return [];
+      return [{ x1: from.x, y1: from.y, x2: to.x, y2: to.y }];
+    });
+    const names = settings.show_project_names ? placeProjectNames(projects, obstacles, fields, arrows) : [];
+    return { fieldLabels, names, legendAt };
+  }, [data.relations, fieldsToDraw, layout, legendPos, pan, posedProjects, settings.show_legend, settings.show_project_names, size.h, size.w, zoom]);
+
+  useEffect(() => {
+    if (!menuAt) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuAt(null);
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && containerRef.current?.querySelector(".venn-menu")?.contains(target)) return;
+      setMenuAt(null);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
+  }, [menuAt]);
+
+  const pngBlob = useCallback(async () => {
+    if (useSvgViz) {
+      const svg = svgRef.current;
+      if (!svg) throw new Error("没有画布");
+      return pngBlobFromSvg(svg, size.w, size.h);
+    }
+    const stage = stageRef.current;
+    if (!stage) throw new Error("没有画布");
+    return blobFromDataUrl(stage.toDataURL({ mimeType: "image/png", pixelRatio: 2 }));
+  }, [size.h, size.w, useSvgViz]);
+
+  const reportExportError = useCallback(
+    (error: unknown) => {
+      showBannerNotice(error instanceof Error ? error.message : "无法导出图片", true);
+    },
+    [showBannerNotice],
+  );
+
+  const exportPng = useCallback(() => {
+    setMenuAt(null);
+    void pngBlob()
+      .then((blob) => {
+        downloadBlob(blob, "venncv.png");
+        showBannerNotice("已导出 PNG");
+      })
+      .catch(reportExportError);
+  }, [pngBlob, reportExportError, showBannerNotice]);
+
+  const exportSvg = useCallback(() => {
+    setMenuAt(null);
+    const task = (async () => {
+      if (useSvgViz && svgRef.current) {
+        const markup = serializeSvg(svgRef.current);
+        downloadBlob(new Blob([markup], { type: "image/svg+xml" }), "venncv.svg");
+        return;
+      }
+      const stage = stageRef.current;
+      if (!stage) throw new Error("没有画布");
+      const url = stage.toDataURL({ mimeType: "image/png", pixelRatio: 2 });
+      const markup = svgWrappingPng(url, size.w, size.h);
+      downloadBlob(new Blob([markup], { type: "image/svg+xml" }), "venncv.svg");
+    })();
+    void task.then(() => showBannerNotice("已导出 SVG")).catch(reportExportError);
+  }, [reportExportError, showBannerNotice, size.h, size.w, useSvgViz]);
+
+  const copyImage = useCallback(() => {
+    setMenuAt(null);
+    void pngBlob()
+      .then((blob) => copyImageToClipboard(blob))
+      .then(() => showBannerNotice("图片已复制"))
+      .catch(reportExportError);
+  }, [pngBlob, reportExportError, showBannerNotice]);
+
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      const drag = legendDragRef.current;
+      if (!drag) return;
+      const host = containerRef.current?.getBoundingClientRect();
+      if (!host) return;
+      const next = clampLegendPosition(
+        drag.ox + event.clientX - drag.x,
+        drag.oy + event.clientY - drag.y,
+        host.width,
+        host.height,
+        LEGEND_BOX.w,
+        LEGEND_BOX.h,
+        canvasChrome(host.width, host.height),
+      );
+      drag.last = next;
+      setLegendPos(next);
+    };
+    const onUp = () => {
+      const drag = legendDragRef.current;
+      if (!drag) return;
+      legendDragRef.current = null;
+      writeLegendPosToStorage(drag.last);
+      setLegendPos(drag.last);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
+
+  const onLegendPointerDown = useCallback((clientX: number, clientY: number) => {
+    const origin = sceneLabels.legendAt;
+    legendDragRef.current = { x: clientX, y: clientY, ox: origin.x, oy: origin.y, last: origin };
+  }, [sceneLabels.legendAt]);
+
   const onBeginPan = useCallback(
-    (clientX: number, clientY: number) => {
+    (clientX: number, clientY: number, pointerId: number) => {
       panRef.current = {
         x: clientX,
         y: clientY,
         ox: pan.x,
         oy: pan.y,
+        pointerId,
       };
+      setPanning(true);
+      const host = containerRef.current;
+      if (!host || pointerId < 0) return;
+      try {
+        host.setPointerCapture(pointerId);
+      } catch {
+        // 指针已经松开时捕获会失败，随后的移动会按按钮状态结束。
+      }
     },
     [pan.x, pan.y],
   );
@@ -228,12 +499,19 @@ export function VisualizationCanvas() {
   return (
     <div
       ref={containerRef}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        setMenuAt({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+      }}
       style={{
         flex: 1,
         minHeight: 0,
         width: "100%",
         background: "#2b2b2b",
         position: "relative",
+        cursor: panning ? "grabbing" : "grab",
       }}
     >
       {useSvgViz ? (
@@ -251,26 +529,28 @@ export function VisualizationCanvas() {
           relationDraftFromId={relationDraftFromId}
           wireEnd={wireEnd}
           wireIndirectPreview={wireIndirectPreview}
-          nameLabelDy={nameLabelDy}
+          sceneLabels={sceneLabels}
+          pose={pose}
+          onDragProject={onDragProject}
           setWireEnd={setWireEnd}
           setWireIndirectPreview={setWireIndirectPreview}
           onBeginPan={onBeginPan}
+          onLegendPointerDown={onLegendPointerDown}
         />
       ) : (
       <Stage
+        ref={stageRef}
         key={`konva-pr-${stagePixelRatio}-${size.w}x${size.h}`}
         width={size.w}
         height={size.h}
         pixelRatio={stagePixelRatio}
         onMouseDown={(e) => {
-          if (e.evt.button === 1 || (e.evt.button === 0 && e.evt.altKey)) {
-            panRef.current = {
-              x: e.evt.clientX,
-              y: e.evt.clientY,
-              ox: pan.x,
-              oy: pan.y,
-            };
-          }
+          const ev = e.evt;
+          if (ev.button === 2) return;
+          if (ev.button === 0 && (ev.metaKey || ev.ctrlKey || ev.shiftKey)) return;
+          if (ev.button !== 0 && ev.button !== 1) return;
+          const pointerId = ev instanceof PointerEvent ? ev.pointerId : -1;
+          onBeginPan(ev.clientX, ev.clientY, pointerId);
         }}
         onMouseMove={(e) => {
           const draft = useAppStore.getState().relationDraftFromId;
@@ -321,26 +601,20 @@ export function VisualizationCanvas() {
           })}
         </Layer>
         <Layer listening={false}>
-          {fieldsToDraw.map((field) => {
-            const [cx, cy] = dataToScreen(
-              field.position[0],
-              field.position[1],
-              layout,
-              zoom,
-              pan,
-            );
-            const r = field.radius * layout.autoScale * zoom;
-            const ty = cy - r - 18;
+          {sceneLabels.fieldLabels.map((label) => {
+            const field = fieldsToDraw.find((item) => item.id === label.id);
+            if (!field) return null;
             return (
               <Text
                 key={`${field.id}-label`}
-                x={cx}
-                y={ty}
+                x={label.x}
+                y={label.y}
                 text={field.name}
-                fontSize={14}
+                fontSize={FIELD_LABEL_FONT}
                 fill="#111"
                 align="center"
-                offsetX={field.name.length * 3.5}
+                offsetX={textWidth(field.name, FIELD_LABEL_FONT) / 2}
+                offsetY={FIELD_LABEL_FONT / 2}
               />
             );
           })}
@@ -350,8 +624,10 @@ export function VisualizationCanvas() {
             const from = data.projects[rel.from_id];
             const to = data.projects[rel.to_id];
             if (!from || !to || from.canvas_hidden === true || to.canvas_hidden === true) return null;
-            const [fx, fy] = dataToScreen(from.position[0], from.position[1], layout, zoom, pan);
-            const [tx, ty] = dataToScreen(to.position[0], to.position[1], layout, zoom, pan);
+            const fromPos = positionOf(from.id, from.position);
+            const toPos = positionOf(to.id, to.position);
+            const [fx, fy] = dataToScreen(fromPos[0], fromPos[1], layout, zoom, pan);
+            const [tx, ty] = dataToScreen(toPos[0], toPos[1], layout, zoom, pan);
             const fr = from.radius * layout.autoScale * zoom;
             const tr = to.radius * layout.autoScale * zoom;
             const dx = tx - fx;
@@ -404,8 +680,11 @@ export function VisualizationCanvas() {
             const to = data.projects[rel.to_id];
             if (!from || !to || rel.tags.length === 0) return null;
             if (from.canvas_hidden === true || to.canvas_hidden === true) return null;
-            const [fx, fy] = dataToScreen(from.position[0], from.position[1], layout, zoom, pan);
-            const [tx, ty] = dataToScreen(to.position[0], to.position[1], layout, zoom, pan);
+            if (selectedProjectId !== from.id && selectedProjectId !== to.id) return null;
+            const fromPos = positionOf(from.id, from.position);
+            const toPos = positionOf(to.id, to.position);
+            const [fx, fy] = dataToScreen(fromPos[0], fromPos[1], layout, zoom, pan);
+            const [tx, ty] = dataToScreen(toPos[0], toPos[1], layout, zoom, pan);
             const fr = from.radius * layout.autoScale * zoom;
             const tr = to.radius * layout.autoScale * zoom;
             const dx = tx - fx;
@@ -417,22 +696,29 @@ export function VisualizationCanvas() {
             const y1 = fy + uy * fr;
             const x2 = tx - ux * tr;
             const y2 = ty - uy * tr;
-            const px = -uy;
-            const py = ux;
-            const mx = (x1 + x2) / 2 + px * 15;
-            const my = (y1 + y2) / 2 + py * 15;
+            const labelAt = relationLabelPoint(x1, y1, x2, y2);
             const text = rel.tags.join(", ");
+            const labelW = textWidth(text, 10);
             return (
-              <Text
-                key={`rel-t-${i}`}
-                x={mx}
-                y={my}
-                text={text}
-                fontSize={10}
-                fill="#444"
-                align="center"
-                offsetX={text.length * 2.5}
-              />
+              <Group key={`rel-t-${i}`} x={labelAt.x} y={labelAt.y} listening={false}>
+                <Rect
+                  x={-labelW / 2 - 4}
+                  y={-9}
+                  width={labelW + 8}
+                  height={16}
+                  fill="rgba(255,255,255,0.92)"
+                  cornerRadius={3}
+                />
+                <Text
+                  x={0}
+                  y={-1}
+                  text={text}
+                  fontSize={10}
+                  fill="#444"
+                  align="center"
+                  offsetX={labelW / 2}
+                />
+              </Group>
             );
           })}
         </Layer>
@@ -440,11 +726,12 @@ export function VisualizationCanvas() {
           {relationDraftFromId && wireEnd ? (() => {
             const from = data.projects[relationDraftFromId];
             if (!from) return null;
-            const [x1, y1] = dataToScreen(from.position[0], from.position[1], layout, zoom, pan);
+            const fromPos = positionOf(from.id, from.position);
+            const [x1, y1] = dataToScreen(fromPos[0], fromPos[1], layout, zoom, pan);
             return (
               <Line
                 points={[x1, y1, wireEnd.x, wireEnd.y]}
-                stroke="#007acc"
+                stroke={SELECTION_RING}
                 strokeWidth={2}
                 dash={wireIndirectPreview ? [6, 6] : undefined}
                 lineCap="round"
@@ -454,7 +741,8 @@ export function VisualizationCanvas() {
         </Layer>
         <Layer>
           {projectList.map((proj) => {
-            const [sx, sy] = dataToScreen(proj.position[0], proj.position[1], layout, zoom, pan);
+            const shown = positionOf(proj.id, proj.position);
+            const [sx, sy] = dataToScreen(shown[0], shown[1], layout, zoom, pan);
             const r = proj.radius * layout.autoScale * zoom;
             const meta = projectStatusVisual(proj.status);
             const strokeW = settings.project_border_width;
@@ -462,23 +750,7 @@ export function VisualizationCanvas() {
             const inMulti = multiSelectedProjectIds.includes(proj.id);
             const completionStroke = completionPercentageToCss(effectiveCompletion(proj));
             return (
-              <Group
-                key={proj.id}
-                x={sx}
-                y={sy}
-                draggable={!relationDraftFromId}
-                onDragStart={(e) => {
-                  if (e.evt.shiftKey) e.target.stopDrag();
-                }}
-                onDragEnd={(e) => {
-                  const g = e.target;
-                  const nx = g.x();
-                  const ny = g.y();
-                  const [dx, dy] = screenToData(nx, ny, layout, zoom, pan);
-                  setProjectPosition(proj.id, [dx, dy]);
-                  g.position({ x: sx, y: sy });
-                }}
-              >
+              <Group key={proj.id} x={sx} y={sy}>
                 {inMulti && !sel ? (
                   <Circle
                     x={0}
@@ -495,7 +767,7 @@ export function VisualizationCanvas() {
                     x={0}
                     y={0}
                     radius={r + 3}
-                    stroke="#007acc"
+                    stroke={SELECTION_RING}
                     strokeWidth={3}
                     fill="rgba(0,0,0,0)"
                     listening={false}
@@ -510,16 +782,46 @@ export function VisualizationCanvas() {
                   strokeWidth={strokeW}
                   onMouseDown={(e) => {
                     const ev = e.evt;
-                    if (ev.shiftKey) return;
-                    if (!(ev.metaKey || ev.ctrlKey)) return;
-                    if (selectedProjectId !== proj.id) return;
-                    ev.preventDefault();
-                    flushSync(() => {
-                      useAppStore.getState().setRelationDraftFrom(proj.id);
-                    });
-                    const p = e.target.getStage()?.getPointerPosition();
-                    if (p) setWireEnd(p);
-                    setWireIndirectPreview(ev.shiftKey);
+                    if (ev.shiftKey || ev.button === 1 || ev.altKey) return;
+                    if (ev.metaKey || ev.ctrlKey) {
+                      if (selectedProjectId !== proj.id) return;
+                      ev.preventDefault();
+                      flushSync(() => {
+                        useAppStore.getState().setRelationDraftFrom(proj.id);
+                      });
+                      const p = e.target.getStage()?.getPointerPosition();
+                      if (p) setWireEnd(p);
+                      setWireIndirectPreview(ev.shiftKey);
+                      return;
+                    }
+                    if (relationDraftFromId) return;
+                    const stage = e.target.getStage();
+                    const container = stage?.container();
+                    if (!stage || !container) return;
+                    e.cancelBubble = true;
+                    beginDrag(proj.id);
+                    const startX = ev.clientX;
+                    const startY = ev.clientY;
+                    let moved = false;
+                    const pointerData = (clientX: number, clientY: number): [number, number] => {
+                      const rect = container.getBoundingClientRect();
+                      return screenToData(clientX - rect.left, clientY - rect.top, layout, zoom, pan);
+                    };
+                    const onMove = (moveEvent: MouseEvent) => {
+                      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 4) moved = true;
+                      moveDrag(proj.id, pointerData(moveEvent.clientX, moveEvent.clientY));
+                    };
+                    const onUp = (upEvent: MouseEvent) => {
+                      window.removeEventListener("mousemove", onMove);
+                      window.removeEventListener("mouseup", onUp);
+                      if (!moved) {
+                        cancelDrag();
+                        return;
+                      }
+                      endDrag(proj.id, pointerData(upEvent.clientX, upEvent.clientY));
+                    };
+                    window.addEventListener("mousemove", onMove);
+                    window.addEventListener("mouseup", onUp);
                   }}
                   onClick={(e) => {
                     const ev = e.evt;
@@ -596,20 +898,21 @@ export function VisualizationCanvas() {
         </Layer>
         {settings.show_project_names ? (
           <Layer listening={false}>
-            {projectList.map((proj) => {
-              const [sx, sy] = dataToScreen(proj.position[0], proj.position[1], layout, zoom, pan);
-              const r = proj.radius * layout.autoScale * zoom;
-              const extraY = nameLabelDy[proj.id] ?? 0;
+            {sceneLabels.names.map((place) => {
+              const proj = data.projects[place.id];
+              if (!proj) return null;
+              const width = textWidth(proj.name, place.fontSize);
+              const offsetX = place.anchor === "start" ? 0 : place.anchor === "end" ? width : width / 2;
               return (
                 <Text
                   key={`${proj.id}-name`}
-                  x={sx}
-                  y={sy + r + 14 + extraY}
+                  x={place.x}
+                  y={place.y}
                   text={proj.name}
-                  fontSize={12}
+                  fontSize={place.fontSize}
                   fill="#111"
-                  align="center"
-                  offsetX={proj.name.length * 3}
+                  offsetX={offsetX}
+                  offsetY={place.fontSize / 2}
                 />
               );
             })}
@@ -617,21 +920,27 @@ export function VisualizationCanvas() {
         ) : null}
         {settings.show_legend ? (() => {
           const statusKeys = Object.keys(PROJECT_STATUS_META) as (keyof typeof PROJECT_STATUS_META)[];
-          const legendW = 126;
-          const legendX = size.w - legendW - 10;
-          const legendY = 12;
-          const titleY = 22;
-          const statusLabelY = 36;
-          const statusRow0 = 50;
+          const legendW = LEGEND_BOX.w;
+          const legendH = LEGEND_BOX.h;
+          const legendX = sceneLabels.legendAt.x;
+          const legendY = sceneLabels.legendAt.y;
+          const titleY = legendY + 10;
+          const statusLabelY = legendY + 24;
+          const statusRow0 = legendY + 38;
           const rowStep = 18;
           const completionTitleY = statusRow0 + statusKeys.length * rowStep + 8;
           const completionRow0 = completionTitleY + 12;
           const completionExamples = [0, 50, 100] as const;
-          const legendH =
-            completionRow0 + completionExamples.length * rowStep + 8 - legendY;
           const cx0 = legendX + 16;
           return (
-            <Layer listening={false}>
+            <Layer>
+              <Group
+                onMouseDown={(event) => {
+                  event.cancelBubble = true;
+                  event.evt.preventDefault();
+                  onLegendPointerDown(event.evt.clientX, event.evt.clientY);
+                }}
+              >
               <Rect
                 x={legendX}
                 y={legendY}
@@ -696,25 +1005,33 @@ export function VisualizationCanvas() {
                   </Group>
                 );
               })}
+              </Group>
             </Layer>
           );
         })() : null}
       </Stage>
       )}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 8,
-          left: 8,
-          right: 8,
-          fontSize: 11,
-          color: "#aaa",
-          pointerEvents: "none",
-        }}
-      >
-        Alt+拖动 或中键平移 · 滚轮缩放 · ⌘/Ctrl+点击另一项目连线（⇧ 虚线）· ⌘/Ctrl+在已选圆上按下拖拽到目标松手 ·
-        画布选项见工具栏「设置」
-      </div>
+      {menuAt ? (
+        <VennContextMenu
+          x={menuAt.x}
+          y={menuAt.y}
+          canvasWidth={size.w}
+          canvasHeight={size.h}
+          onRefreshLayout={() => {
+            setMenuAt(null);
+            relayoutFieldsAsVenn();
+          }}
+          selectActions={[
+            { label: "同状态", title: "选中状态相同的项目", onClick: () => { setMenuAt(null); selectProjectsWithSameStatus(); } },
+            { label: "同领域", title: "选中所属领域勾选完全相同的项目", onClick: () => { setMenuAt(null); selectProjectsWithSameFieldSet(); } },
+            { label: "同前缀", title: "按空格或连字符 - 前的一段选择", onClick: () => { setMenuAt(null); selectProjectsWithSamePrefix(); } },
+            { label: "同维恩关系", title: "选中落在同一块交集里的项目", onClick: () => { setMenuAt(null); selectProjectsWithSameVennRelation(); } },
+          ]}
+          onExportPng={exportPng}
+          onExportSvg={exportSvg}
+          onCopyImage={copyImage}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 .timeline-page {
+  position: relative;
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -8,11 +9,48 @@
   color: #222;
 }
 
+.timeline-scale {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 8;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 1px 3px rgba(15, 15, 15, 0.08),
+    0 0 0 1px rgba(15, 15, 15, 0.06);
+}
+
+.timeline-scale button {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #37352f;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.timeline-scale button:hover:not(:disabled) {
+  background: rgba(55, 53, 47, 0.06);
+}
+
+.timeline-scale button:disabled {
+  color: #c4c3c0;
+  cursor: default;
+}
+
 .timeline-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 16px 16px 8px;
+  padding: 52px 16px 8px;
 }
 
 .timeline-empty {
@@ -31,6 +69,17 @@
   height: 28px;
   margin: 0 8px 8px 140px;
   border-bottom: 1px solid #d0d4da;
+  cursor: grab;
+  touch-action: none;
+}
+
+.timeline-today {
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  width: 1px;
+  background: #c4554a;
+  pointer-events: none;
 }
 
 .timeline-tick {
@@ -124,7 +173,7 @@
   right: 28px;
   top: 10px;
   height: 72px;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .timeline-point.is-progress {

@@ -9,7 +9,7 @@ import {
   syncFolderPath,
   type DavTransport,
   type SyncAccountFields,
-} from "./jianguoyun";
+} from "./nutstore";
 import { mergeJsonText } from "./jsonMerge";
 
 const PROPFIND_BODY = `<?xml version="1.0" encoding="utf-8"?>

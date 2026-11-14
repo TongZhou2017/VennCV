@@ -17,10 +17,12 @@ import {
 } from "../domain/projectLayout";
 import {
   layoutFieldsVennPositions,
+  visibleFieldLayoutCensus,
   VENN_FIELD_BASE_RADIUS,
   VENN_CENTER_X,
   VENN_CENTER_Y,
 } from "../domain/fieldVennLayout";
+import { fieldSetKey, projectNamePrefix, vennRelationKey } from "../domain/projectSelect";
 import {
   addProgressBlock as addProgressBlockToProject,
   addProgressFigure as addProgressFigureToProject,
@@ -275,7 +277,8 @@ export interface AppState {
   clearMultiProjectSelection: () => void;
   selectProjectsWithSameStatus: () => void;
   selectProjectsWithSameFieldSet: () => void;
-  selectProjectsWithSameName: () => void;
+  selectProjectsWithSamePrefix: () => void;
+  selectProjectsWithSameVennRelation: () => void;
   setProjectsCanvasHidden: (ids: string[], hidden: boolean) => void;
   moveProjectsToTrash: (ids: string[]) => void;
   restoreProjectFromTrash: (id: string) => void;
@@ -305,6 +308,10 @@ export interface AppState {
   /** 按侧栏顺序重排 projectOrder（传入项目 id），不改变项目数据 */
   reorderProjects: (fromProjectId: string, toProjectId: string) => void;
   setProjectPosition: (id: string, pos: [number, number]) => void;
+  /** 拖动松手前预览停稳位置，不写入工作区 */
+  previewDrag: (id: string, pos: [number, number]) => AppDataJson | null;
+  /** 把已经求好的布局写入工作区，不再跑一遍求解 */
+  commitSettled: (next: AppDataJson) => void;
 
   importJsonFile: (text: string) => void;
   prepareExport: () => void;
@@ -479,6 +486,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAuthorDisplay: (mode) => {
     writeAuthorDisplayToStorage(mode);
     set({ authorDisplay: mode });
+    const next = cloneAppData(get().data);
+    get().commitData(next, true, undefined, { mutateFields: false });
   },
   selectPerson: (id) => {
     if (id && !get().data.people[id]) return;
@@ -763,8 +772,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   setVisualizationZoom: (z) => set({ visualizationZoom: Math.min(6, Math.max(0.08, z)) }),
   setVisualizationOffset: (o) => set({ visualizationOffset: o }),
   zoomBy: (factor) => {
-    const z = get().visualizationZoom * factor;
-    get().setVisualizationZoom(z);
+    const z0 = get().visualizationZoom;
+    const z1 = Math.min(6, Math.max(0.08, z0 * factor));
+    const pan = get().visualizationOffset;
+    const scale = z0 > 0 ? z1 / z0 : 1;
+    set({
+      visualizationZoom: z1,
+      visualizationOffset: { x: pan.x * scale, y: pan.y * scale },
+    });
   },
 
   undo: () => {
@@ -807,11 +822,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { settings, history, historyIndex, fieldOrder, projectOrder } = get();
     sanitizeAppDataInPlace(next);
     const skipLayout = opts?.skipLayoutValidate === true;
+    const physics = { authorDisplay: get().authorDisplay };
     const validated = skipLayout
       ? next
       : opts?.mutateFields === false
-        ? validateProjectPositionsWithoutMutatingFields(next)
-        : validateAndFixProjectPositions(next);
+        ? validateProjectPositionsWithoutMutatingFields(next, physics)
+        : validateAndFixProjectPositions(next, physics);
     const fo =
       orderOverrides?.fieldOrder !== undefined
         ? mergeFieldOrder(orderOverrides.fieldOrder, validated)
@@ -931,10 +947,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().showBannerNotice("请先选择一个项目", true);
       return;
     }
-    const key = (fids: string[]) => [...fids].sort().join("|");
-    const k = key(data.projects[selectedProjectId]!.field_ids);
+    const key = fieldSetKey(data.projects[selectedProjectId]!.field_ids);
     const ids = Object.values(data.projects)
-      .filter((p) => key(p.field_ids) === k)
+      .filter((p) => fieldSetKey(p.field_ids) === key)
       .map((p) => p.id);
     set({
       multiSelectedProjectIds: ids,
@@ -945,15 +960,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().showBannerNotice(`已选中 ${ids.length} 个同所属领域组合的项目`);
   },
 
-  selectProjectsWithSameName: () => {
+  selectProjectsWithSamePrefix: () => {
     const { data, selectedProjectId } = get();
     if (!selectedProjectId || !data.projects[selectedProjectId]) {
       get().showBannerNotice("请先选择一个项目", true);
       return;
     }
-    const name = data.projects[selectedProjectId]!.name.trim();
+    const prefix = projectNamePrefix(data.projects[selectedProjectId]!.name);
+    if (!prefix) {
+      get().showBannerNotice("这个名称没有可比较的前缀", true);
+      return;
+    }
     const ids = Object.values(data.projects)
-      .filter((p) => p.name.trim() === name)
+      .filter((p) => projectNamePrefix(p.name) === prefix)
       .map((p) => p.id);
     set({
       multiSelectedProjectIds: ids,
@@ -961,7 +980,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       projectEditBuffer: { ...data.projects[selectedProjectId]! },
       relationDraftFromId: null,
     });
-    get().showBannerNotice(`已选中 ${ids.length} 个同名项目`);
+    get().showBannerNotice(`已选中 ${ids.length} 个前缀为「${prefix}」的项目`);
+  },
+
+  selectProjectsWithSameVennRelation: () => {
+    const { data, selectedProjectId } = get();
+    if (!selectedProjectId || !data.projects[selectedProjectId]) {
+      get().showBannerNotice("请先选择一个项目", true);
+      return;
+    }
+    const known = new Set(Object.keys(data.fields));
+    const key = vennRelationKey(data.projects[selectedProjectId]!.field_ids, known);
+    const ids = Object.values(data.projects)
+      .filter((p) => vennRelationKey(p.field_ids, known) === key)
+      .map((p) => p.id);
+    set({
+      multiSelectedProjectIds: ids,
+      selectedProjectId,
+      projectEditBuffer: { ...data.projects[selectedProjectId]! },
+      relationDraftFromId: null,
+    });
+    get().showBannerNotice(`已选中 ${ids.length} 个落在同一块交集的项目`);
   },
 
   setProjectsCanvasHidden: (ids, hidden) => {
@@ -1278,7 +1317,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     next.fields[id] = f;
     const orderIds = [...fieldOrder.filter((fid) => next.fields[fid])];
     if (!orderIds.includes(id)) orderIds.push(id);
-    next.fields = layoutFieldsVennPositions(orderIds, next.fields);
+    next.fields = layoutFieldsVennPositions(
+      orderIds,
+      next.fields,
+      visibleFieldLayoutCensus(next, orderIds),
+    );
     recalculateAllProjectPositions(next);
     get().commitData(next);
     syncProjectEditBufferGeometry(get, set);
@@ -1289,7 +1332,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = cloneAppData(data);
     const orderIds = fieldOrder.filter((fid) => next.fields[fid]);
     if (orderIds.length === 0) return;
-    next.fields = layoutFieldsVennPositions(orderIds, next.fields);
+    next.fields = layoutFieldsVennPositions(
+      orderIds,
+      next.fields,
+      visibleFieldLayoutCensus(next, orderIds),
+    );
     recalculateAllProjectPositions(next);
     get().commitData(next);
     syncProjectEditBufferGeometry(get, set);
@@ -1304,7 +1351,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const orderIds = fieldOrder.filter((fid) => fid !== id && next.fields[fid]);
     if (orderIds.length > 0) {
-      next.fields = layoutFieldsVennPositions(orderIds, next.fields);
+      next.fields = layoutFieldsVennPositions(
+      orderIds,
+      next.fields,
+      visibleFieldLayoutCensus(next, orderIds),
+    );
     }
     recalculateAllProjectPositions(next);
     get().commitData(next);
@@ -1341,7 +1392,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     next.fields = newFields;
     const vennOrder = nextOrder.filter((fid) => next.fields[fid]);
     if (vennOrder.length > 0) {
-      next.fields = layoutFieldsVennPositions(vennOrder, next.fields);
+      next.fields = layoutFieldsVennPositions(
+        vennOrder,
+        next.fields,
+        visibleFieldLayoutCensus(next, vennOrder),
+      );
     }
     recalculateAllProjectPositions(next);
     get().commitData(next, false, { fieldOrder: nextOrder });
@@ -1397,12 +1452,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!next.projects[id]) return;
     next.projects[id] = { ...next.projects[id], position: pos };
     // 每次拖放结束若写入撤销栈，会堆积多份整工作区深拷贝 + 校验再拷贝，数分钟内易撑爆内存导致 WebView 被系统结束（闪退）。
-    // 整图 validate 会反复扩领域半径、推领域圆心，三圆交集越挤越小并加重计算；拖放仅做「不改动 fields」的轻校验。
+    // 拖放只滑开项目，不改领域半径。
     get().commitData(next, true, undefined, { mutateFields: false });
     if (get().selectedProjectId === id) {
       const p = get().data.projects[id];
       if (p) set({ projectEditBuffer: { ...p } });
     }
+  },
+
+  previewDrag: (id, pos) => {
+    const next = cloneAppData(get().data);
+    const project = next.projects[id];
+    if (!project) return null;
+    next.projects[id] = { ...project, position: pos };
+    return validateProjectPositionsWithoutMutatingFields(next, {
+      authorDisplay: get().authorDisplay,
+    });
+  },
+
+  commitSettled: (next) => {
+    get().commitData(next, true, undefined, { skipLayoutValidate: true });
+    const id = get().selectedProjectId;
+    if (!id) return;
+    const project = get().data.projects[id];
+    if (project) set({ projectEditBuffer: { ...project } });
   },
 
   importJsonFile: (text) => {

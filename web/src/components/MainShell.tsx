@@ -11,6 +11,11 @@ import { ExportModal } from "./ExportModal";
 import { PersonLibrary } from "./PersonLibrary";
 import { SettingsModal } from "./SettingsModal";
 import { VersionHistoryModal } from "./VersionHistoryModal";
+import { ViewModeSwitch } from "./ViewModeSwitch";
+import { VennZoom } from "./VennZoom";
+import { SidebarEdge } from "./SidebarEdge";
+import { HelpModal } from "./HelpModal";
+import { SelectionCount } from "./SelectionCount";
 import { readVisualizationRenderPrefsFromStorage } from "../storage/uiPrefs";
 import type { WorkspaceView } from "../store/appStore";
 
@@ -31,6 +36,7 @@ function WorkspaceCanvas({ view }: { view: WorkspaceView }) {
 
 export function MainShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [toolbarLeadingInset, setToolbarLeadingInset] = useState(0);
   const setSettings = useAppStore((s) => s.setSettings);
@@ -43,6 +49,8 @@ export function MainShell() {
   const clearStorageError = useAppStore((s) => s.clearStorageError);
   const bannerNotice = useAppStore((s) => s.bannerNotice);
   const leftSidebarOpen = useAppStore((s) => s.leftSidebarOpen);
+  const toggleLeftSidebar = useAppStore((s) => s.toggleLeftSidebar);
+  const toggleRightSidebar = useAppStore((s) => s.toggleRightSidebar);
   const personLibraryOpen = useAppStore((s) => s.personLibraryOpen);
   const setPersonLibraryOpen = useAppStore((s) => s.setPersonLibraryOpen);
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen);
@@ -230,6 +238,7 @@ export function MainShell() {
         onImportClick={() => importRef.current?.click()}
         onExportClick={() => prepareExport()}
         onSettingsClick={() => setSettingsOpen(true)}
+        onHelpClick={() => setHelpOpen(true)}
         onVersionsClick={() => setVersionsOpen(true)}
       />
       {bannerNotice ? (
@@ -283,6 +292,15 @@ export function MainShell() {
           }
         >
           <WorkspaceCanvas view={workspaceView} />
+          <ViewModeSwitch />
+          {workspaceView === "venn" ? <VennZoom /> : null}
+          <SelectionCount />
+          {vennPreview ? null : (
+            <>
+              <SidebarEdge side="left" open={leftSidebarOpen} onToggle={() => toggleLeftSidebar()} />
+              <SidebarEdge side="right" open={rightSidebarOpen} onToggle={() => toggleRightSidebar()} />
+            </>
+          )}
           {vennPreview ? (
             <button
               type="button"
@@ -311,6 +329,7 @@ export function MainShell() {
       </div>
       <ExportModal />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       <PersonLibrary open={personLibraryOpen} onClose={() => setPersonLibraryOpen(false)} />
       <VersionHistoryModal open={versionsOpen} onClose={() => setVersionsOpen(false)} />
     </div>

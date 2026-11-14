@@ -1,6 +1,6 @@
 import { useAppStore } from "../store/appStore";
 import type { ProgressBlock, Project } from "../types";
-import { blocksOf, effectiveCompletion, isBlockDone, remainingDays, slotsOf } from "../domain/progress";
+import { blocksForPerson, blocksOf, effectiveCompletion, isBlockDone, remainingDays, slotsOf } from "../domain/progress";
 import { todayIsoDate } from "../domain/projectTime";
 import { taskMark, toneClass } from "./taskStatus";
 
@@ -14,6 +14,55 @@ function compareBlocks(a: ProgressBlock, b: ProgressBlock, today: string): numbe
     if (leftA !== leftB) return leftA - leftB;
   }
   return b.date.localeCompare(a.date) || a.id.localeCompare(b.id);
+}
+
+/** 合作网络里点中的人：按项目列出他记下的待办。 */
+export function PersonTaskList(props: { personId: string }) {
+  const projects = useAppStore((s) => s.data.projects);
+  const people = useAppStore((s) => s.data.people);
+  const selectProject = useAppStore((s) => s.selectProject);
+  const today = todayIsoDate();
+  const name = people[props.personId]?.name.trim() || "这个人";
+  const rows = blocksForPerson(projects, props.personId);
+  const grouped = new Map<string, { projectId: string; projectName: string; completion: number; rows: typeof rows }>();
+  for (const row of rows) {
+    const current = grouped.get(row.projectId);
+    if (current) current.rows.push(row);
+    else grouped.set(row.projectId, { projectId: row.projectId, projectName: row.projectName, completion: row.completion, rows: [row] });
+  }
+  const groups = [...grouped.values()];
+
+  return (
+    <div className="task-page">
+      <section className="task-card">
+        <h3>{`${name}的进展`}</h3>
+        <p className="task-hint">点一条就打开那个项目的待办。</p>
+        {groups.length === 0 ? <p className="task-hint">这个人还没有记下的进展</p> : null}
+        {groups.map((group) => (
+          <div key={group.projectId} className="task-group">
+            <h4>{`${group.projectName} · ${Math.round(group.completion)}%`}</h4>
+            {group.rows.map((row) => {
+              const mark = taskMark({ completed_on: row.completedOn, due: row.due }, today);
+              const when = row.due ? `${row.date} → ${row.due}` : row.date;
+              return (
+                <button
+                  key={row.blockId}
+                  type="button"
+                  className="task-row"
+                  onClick={() => selectProject(row.projectId, { blockId: row.blockId })}
+                >
+                  <span className="task-row-title">{row.title}</span>
+                  <span className={`task-badge ${toneClass(mark.tone)}`}>{mark.text}</span>
+                  <span className="task-row-meta">{row.slotLabel}</span>
+                  <span className="task-row-meta">{when}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </section>
+    </div>
+  );
 }
 
 export function ProgressBoard(props: { projectIds: string[]; mode: "all" | "selection" }) {

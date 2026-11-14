@@ -10,7 +10,7 @@ export type ProjectStatus =
 export type RelationType = "Direct" | "Indirect";
 
 /** 维恩图上人物球的显示范围。只存在本地界面设置里，不写入工作区。 */
-export type AuthorDisplayMode = "off" | "primary" | "all";
+export type AuthorDisplayMode = "off" | "todo" | "primary" | "all";
 
 /** 读入旧数据时用。保存后不再写回。 */
 export type AuthorRole = "First" | "Corresponding" | "Coauthor" | "Other";
@@ -124,9 +124,11 @@ export function coerceAuthorRole(raw: unknown): AuthorRole {
 }
 
 export function coerceAuthorDisplayMode(raw: unknown): AuthorDisplayMode {
+  if (raw === "todo") return "todo";
   if (raw === "primary") return "primary";
   if (raw === "all") return "all";
-  return "off";
+  if (raw === "off") return "off";
+  return "todo";
 }
 
 /** 投稿关键时间点。`Custom` 的名称写在 `label`。 */
@@ -350,7 +352,7 @@ export const PROJECT_STATUS_META: Record<
   Submitted: { label: "投稿中", fill: "#2196f3", text: "#fff" },
   HighPriority: { label: "优先做", fill: "#f44336", text: "#fff" },
   SteadyProgress: { label: "稳步做", fill: "#ff9800", text: "#fff" },
-  ToBeStarted: { label: "待启动", fill: "#ffffff", text: "#333" },
+  ToBeStarted: { label: "待启动", fill: "#d4d4d4", text: "#333" },
 };
 
 /** 导入/合并 JSON 或损坏数据时 status 可能非法；不处理则 `PROJECT_STATUS_META[s]` 为 undefined，画布/侧栏渲染会整页崩溃。 */

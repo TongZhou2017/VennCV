@@ -1,6 +1,7 @@
 [package]
 name = "venncv-tauri"
-version = "0.11.15"
+version = "0.12.19"
+license = "AGPL-3.0-only"
 description = "VennCV desktop (Tauri + WebView)"
 authors = ["VennCV"]
 edition = "2021"

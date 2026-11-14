@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+/// 坚果云（Nutstore）WebDAV。主机是服务自己的域名。
 const DAV_ROOT: &str = "https://dav.jianguoyun.com/dav/";
 
 fn safe_segment(part: &str) -> bool {
@@ -89,7 +90,7 @@ fn precondition_header(value: Option<String>) -> Result<Option<String>, String> 
 }
 
 #[tauri::command]
-pub fn jianguoyun_webdav(
+pub fn nutstore_webdav(
     method: String,
     path: String,
     body: Option<String>,

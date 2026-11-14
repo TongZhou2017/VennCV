@@ -4,6 +4,7 @@ import { coerceAuthorDisplayMode, type AppSettings, type AuthorDisplayMode } fro
 export const LS_SVG_VIZ = "venncv_svg_viz";
 export const LS_FORCE_CANVAS_PR1 = "venncv_force_canvas_pr1";
 export const LS_AUTHOR_DISPLAY = "venncv_author_display";
+export const LS_LEGEND_POS = "venncv_legend_pos";
 
 /** 与 localStorage 同步的可视化相关设置（不写 workspace.json） */
 export type VisualizationRenderPrefs = Pick<
@@ -51,10 +52,31 @@ export function writeVisualizationRenderPrefsToStorage(prefs: VisualizationRende
 export function readAuthorDisplayFromStorage(): AuthorDisplayMode {
   try {
     const stored = globalThis.localStorage?.getItem(LS_AUTHOR_DISPLAY);
-    if (!stored) return "primary";
+    if (!stored) return "todo";
     return coerceAuthorDisplayMode(stored);
   } catch {
-    return "primary";
+    return "todo";
+  }
+}
+
+export function readLegendPosFromStorage(): { x: number; y: number } | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(LS_LEGEND_POS);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as { x?: unknown; y?: unknown };
+    if (typeof parsed.x !== "number" || typeof parsed.y !== "number") return null;
+    if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) return null;
+    return { x: parsed.x, y: parsed.y };
+  } catch {
+    return null;
+  }
+}
+
+export function writeLegendPosToStorage(pos: { x: number; y: number }): void {
+  try {
+    globalThis.localStorage?.setItem(LS_LEGEND_POS, JSON.stringify({ x: pos.x, y: pos.y }));
+  } catch {
+    /* ignore */
   }
 }
 

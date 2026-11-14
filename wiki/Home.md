@@ -1,6 +1,6 @@
 欢迎来到 **VennCV** 开发者文档（GitHub Wiki）。
 
-这里面向**从源码参与开发、打包与排错**的贡献者；普通用户请阅读仓库根目录的 [README](https://github.com/TongZhou2017/VennCV/blob/main/README.md)。
+这里面向**从源码参与开发、打包与排错**的贡献者；普通用户请阅读仓库根目录的 [README](https://github.com/TongZhou2017/VennCV/blob/master/README.md)。
 
 ## 本 Wiki 包含
 

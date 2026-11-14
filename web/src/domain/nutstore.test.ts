@@ -4,24 +4,24 @@ import {
   SYNC_MARKER_BODY,
   cloudChildNames,
   isSafeDavPath,
-  listJianguoyunUsers,
-  probeJianguoyun,
+  listNutstoreUsers,
+  probeNutstore,
   readSyncAccount,
   syncFolderPath,
   writeSyncAccount,
   type DavCall,
   type DavResponse,
-} from "./jianguoyun";
+} from "./nutstore";
 
 function scripted(steps: DavResponse[]): (call: DavCall) => Promise<DavResponse> {
   const pending = [...steps];
   return async () => pending.shift() ?? { status: 500, body: "" };
 }
 
-describe("jianguoyun probe", () => {
+describe("nutstore probe", () => {
   it("creates the folder, then writes and reads the marker", async () => {
     const calls: DavCall[] = [];
-    const result = await probeJianguoyun(async (call) => {
+    const result = await probeNutstore(async (call) => {
       calls.push(call);
       if (call.method === "MKCOL") return { status: 201, body: "" };
       if (call.method === "PUT") return { status: 204, body: "" };
@@ -38,7 +38,7 @@ describe("jianguoyun probe", () => {
   });
 
   it("treats an existing folder as connected", async () => {
-    const result = await probeJianguoyun(
+    const result = await probeNutstore(
       scripted([
         { status: 405, body: "" },
         { status: 201, body: "" },
@@ -50,7 +50,7 @@ describe("jianguoyun probe", () => {
   });
 
   it("stops when the password is rejected", async () => {
-    const result = await probeJianguoyun(scripted([{ status: 401, body: "" }]), {
+    const result = await probeNutstore(scripted([{ status: 401, body: "" }]), {
       email: "a@b.c",
       password: "nope",
       folder: "VennCV",
@@ -107,10 +107,10 @@ const NESTED_XML = `<?xml version="1.0" encoding="utf-8"?>
   <d:response><d:href>/dav/VennCV/users/workspace.json</d:href><d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat></d:response>
 </d:multistatus>`;
 
-describe("jianguoyun users", () => {
+describe("nutstore users", () => {
   it("reads users inside the users folder and keeps other folders beside it", async () => {
     const calls: string[] = [];
-    const result = await listJianguoyunUsers(async (call) => {
+    const result = await listNutstoreUsers(async (call) => {
       calls.push(`${call.method} ${call.path}`);
       if (call.path === "VennCV") return { status: 207, body: TOP_XML };
       if (call.path === "VennCV/users") return { status: 207, body: NESTED_XML };
@@ -126,7 +126,7 @@ describe("jianguoyun users", () => {
 
   it("lists folders directly under the remote path when there is no users folder", async () => {
     const xml = TOP_XML.replace("<d:response><d:href>/dav/VennCV/users/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>", "");
-    const result = await listJianguoyunUsers(async () => ({ status: 207, body: xml }), {
+    const result = await listNutstoreUsers(async () => ({ status: 207, body: xml }), {
       email: "a@b.c",
       password: "secret",
       folder: "VennCV",
@@ -135,7 +135,7 @@ describe("jianguoyun users", () => {
   });
 
   it("reports a rejected password while listing", async () => {
-    const result = await listJianguoyunUsers(async () => ({ status: 401, body: "" }), {
+    const result = await listNutstoreUsers(async () => ({ status: 401, body: "" }), {
       email: "a@b.c",
       password: "nope",
       folder: "VennCV",

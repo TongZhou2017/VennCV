@@ -1,0 +1,106 @@
+.venn-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 168px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #fff;
+  color: #37352f;
+  font-size: 13px;
+  line-height: 1.3;
+  box-shadow:
+    0 8px 24px rgba(15, 15, 15, 0.16),
+    0 0 0 1px rgba(15, 15, 15, 0.06);
+}
+
+.venn-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.venn-menu button:hover,
+.venn-menu-branch:hover > button {
+  background: rgba(55, 53, 47, 0.08);
+}
+
+.venn-menu-branch {
+  position: relative;
+}
+
+.venn-menu-fly {
+  display: none;
+  position: absolute;
+  top: -4px;
+  left: calc(100% - 4px);
+  min-width: 148px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow:
+    0 8px 24px rgba(15, 15, 15, 0.16),
+    0 0 0 1px rgba(15, 15, 15, 0.06);
+}
+
+.venn-menu.is-flip .venn-menu-fly {
+  left: auto;
+  right: calc(100% - 4px);
+}
+
+.venn-menu-branch:hover > .venn-menu-fly,
+.venn-menu-branch:focus-within > .venn-menu-fly {
+  display: block;
+}
+
+.venn-menu-rule {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(55, 53, 47, 0.1);
+}
+
+.venn-menu-caret {
+  color: #9b9a97;
+  font-size: 11px;
+}
+
+.viz-selection {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #37352f;
+  font-size: 12px;
+  box-shadow:
+    0 1px 3px rgba(15, 15, 15, 0.08),
+    0 0 0 1px rgba(15, 15, 15, 0.06);
+}
+
+.viz-selection button {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #37352f;
+  font: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.viz-selection button:hover {
+  background: rgba(55, 53, 47, 0.08);
+}

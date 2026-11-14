@@ -1,0 +1,73 @@
+.view-mode-switch {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 8;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 1px 3px rgba(15, 15, 15, 0.08),
+    0 0 0 1px rgba(15, 15, 15, 0.06);
+}
+
+.view-mode-switch button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #9b9a97;
+  padding: 0;
+  cursor: pointer;
+}
+
+.view-mode-switch button:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: #37352f;
+}
+
+.view-mode-switch button[aria-pressed="true"] {
+  background: rgba(55, 53, 47, 0.1);
+  color: #37352f;
+}
+
+.venn-zoom {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 8;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 1px 3px rgba(15, 15, 15, 0.08),
+    0 0 0 1px rgba(15, 15, 15, 0.06);
+}
+
+.venn-zoom button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #37352f;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.venn-zoom button:hover {
+  background: rgba(55, 53, 47, 0.06);
+}

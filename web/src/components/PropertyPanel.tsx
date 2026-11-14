@@ -6,7 +6,7 @@ import { effectiveCompletion, hasProgressBlocks } from "../domain/progress";
 import { ProjectTimeFields } from "./ProjectTimeFields";
 import { AuthorPanel } from "./AuthorPanel";
 import { ProgressEditor } from "./ProgressEditor";
-import { ProgressBoard } from "./ProgressBoard";
+import { PersonTaskList, ProgressBoard } from "./ProgressBoard";
 import { FigurePlan } from "./FigurePlan";
 import { GrantView } from "./GrantView";
 import "./property-panel.css";
@@ -170,7 +170,8 @@ export function PropertyPanel() {
   const requestedPropertyTab = useAppStore((s) => s.requestedPropertyTab);
 
   useEffect(() => {
-    if (selectedPersonId) setTab("authors");
+    if (!selectedPersonId) return;
+    setTab(useAppStore.getState().workspaceView === "collaboration" ? "tasks" : "authors");
   }, [selectedPersonId]);
 
   useEffect(() => {
@@ -225,7 +226,11 @@ export function PropertyPanel() {
             case "authors":
               return <AuthorPanel />;
             case "tasks":
-              return <ProgressBoard projectIds={ids} mode="all" />;
+              return selectedPersonId ? (
+                <PersonTaskList personId={selectedPersonId} />
+              ) : (
+                <ProgressBoard projectIds={ids} mode="all" />
+              );
             case "grants":
               return <GrantView />;
             case "properties":

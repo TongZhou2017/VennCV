@@ -1,22 +1,9 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useAppStore } from "../store/appStore";
 import { buildCollaborationLayout, type CollabNode } from "../domain/authors";
-import { blocksForPerson, type PersonProgress } from "../domain/progress";
-import { todayIsoDate } from "../domain/projectTime";
-import { taskMark } from "./taskStatus";
 import "./collaboration.css";
 
 const NODE_R = 22;
-
-function tasksByProject(rows: PersonProgress[]): PersonProgress[][] {
-  const groups = new Map<string, PersonProgress[]>();
-  for (const row of rows) {
-    const list = groups.get(row.projectId);
-    if (list) list.push(row);
-    else groups.set(row.projectId, [row]);
-  }
-  return [...groups.values()];
-}
 
 function boundsOf(nodes: CollabNode[]) {
   let minX = Infinity;
@@ -41,7 +28,6 @@ export function CollaborationView() {
   const updatePerson = useAppStore((s) => s.updatePerson);
   const resetCollaborationPositions = useAppStore((s) => s.resetCollaborationPositions);
   const setPersonLibraryOpen = useAppStore((s) => s.setPersonLibraryOpen);
-  const requestPropertyTab = useAppStore((s) => s.requestPropertyTab);
   const model = useMemo(() => buildCollaborationLayout(data), [data]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [live, setLive] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -70,10 +56,6 @@ export function CollaborationView() {
       }
     | null
   >(null);
-  const todos = useMemo(
-    () => (selectedPersonId ? blocksForPerson(data.projects, selectedPersonId) : []),
-    [data.projects, selectedPersonId],
-  );
   const nodes = model.nodes.map((node) => (live?.id === node.personId ? { ...node, x: live.x, y: live.y } : node));
   const frame = frozen ?? (nodes.length > 0 ? boundsOf(nodes) : { minX: 0, minY: 0, width: 320, height: 240 });
   const selected = selectedPersonId ? data.people[selectedPersonId] : undefined;
@@ -120,8 +102,14 @@ export function CollaborationView() {
       setFrozen(null);
       if (!drag || drag.kind !== "node") return;
       if (!drag.moved) {
-        const current = useAppStore.getState().selectedPersonId;
-        selectPerson(current === drag.id ? null : drag.id);
+        const state = useAppStore.getState();
+        if (state.selectedPersonId === drag.id && !state.selectedProjectId) {
+          selectPerson(null);
+        } else {
+          selectPerson(drag.id);
+          selectProject(null);
+          useAppStore.setState({ rightSidebarOpen: true });
+        }
         setLive(null);
         return;
       }
@@ -165,48 +153,6 @@ export function CollaborationView() {
     trackPointer();
   };
 
-  const taskPanel = (
-    <aside className="collab-tasks" aria-label="进展">
-      <h2>进展</h2>
-      {!selectedPersonId ? (
-        <p className="collab-empty">点一个人物，查看他记下的进展。</p>
-      ) : todos.length === 0 ? (
-        <p className="collab-empty">这个人还没有记下的进展</p>
-      ) : (
-        tasksByProject(todos).map((group) => {
-          const first = group[0];
-          if (!first) return null;
-          return (
-            <section key={first.projectId} className="collab-task-project">
-              <h3>
-                {first.projectName}
-                <span>{`${Math.round(first.completion)}%`}</span>
-              </h3>
-              {group.map((task) => {
-                const mark = taskMark({ completed_on: task.completedOn, due: task.due }, todayIsoDate());
-                return (
-                  <button
-                    key={task.blockId}
-                    type="button"
-                    className="collab-task"
-                    onClick={() => {
-                      selectProject(task.projectId, { blockId: task.blockId });
-                      requestPropertyTab("tasks");
-                    }}
-                  >
-                    <span>{task.title}</span>
-                    <span>{task.slotLabel}</span>
-                    <span>{mark.text}</span>
-                  </button>
-                );
-              })}
-            </section>
-          );
-        })
-      )}
-    </aside>
-  );
-
   const tools = (
     <div className="collab-tools">
       <button type="button" onClick={() => setPersonLibraryOpen(true)}>
@@ -246,7 +192,6 @@ export function CollaborationView() {
           {tools}
           <p className="collab-empty">还没有挂到项目上的人物。在人物库里加人，再到作者页把他们加入项目后，这里会按共同项目连线。</p>
         </div>
-        {taskPanel}
       </div>
     );
   }
@@ -316,7 +261,6 @@ export function CollaborationView() {
           })}
         </svg>
       </div>
-      {taskPanel}
     </div>
   );
 }

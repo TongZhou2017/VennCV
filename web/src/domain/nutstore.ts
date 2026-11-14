@@ -1,8 +1,8 @@
 import { CLOUD_MANIFEST_FILENAME, isCloudDataFilename, isSafeUsername } from "../storage/libraryPaths";
 
-/** 坚果云 WebDAV。地址固定，调用方不能改主机。 */
+/** 坚果云（Nutstore）WebDAV。主机是服务自己的域名，调用方不能改。 */
 
-export const JIANGUOYUN_DAV_ROOT = "https://dav.jianguoyun.com/dav/";
+export const NUTSTORE_DAV_ROOT = "https://dav.jianguoyun.com/dav/";
 export const DEFAULT_SYNC_FOLDER = "VennCV";
 export const SYNC_MARKER_NAME = ".venncv-sync";
 export const SYNC_MARKER_BODY = "venncv\n";
@@ -147,7 +147,7 @@ export function cloudChildNames(xml: string, parent: string): string[] | null {
  * 创建远程目录，写入 `.venncv-sync` 再读回。
  * 目录已经存在时 MKCOL 常返回 405，仍算连通。
  */
-export async function probeJianguoyun(
+export async function probeNutstore(
   transport: DavTransport,
   account: SyncAccountFields,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -203,7 +203,7 @@ async function propfindChildren(
  * 列出远程目录下的用户文件夹。
  * 若其中有 `users`，则改看这个文件夹里面的用户，不再把 `users` 本身当成一个用户。
  */
-export async function listJianguoyunUsers(
+export async function listNutstoreUsers(
   transport: DavTransport,
   account: SyncAccountFields,
 ): Promise<{ ok: true; users: string[] } | { ok: false; message: string }> {
@@ -212,14 +212,14 @@ export async function listJianguoyunUsers(
   const folder = syncFolderPath(account.folder);
   if (!folder) return { ok: false, message: "远程目录无效" };
   const top = await propfindChildren(transport, account, folder);
-  if (!top.ok) return top;
+  if (top.ok === false) return top;
   const direct = top.names.filter((name) => name !== "users");
   if (!top.names.includes("users")) {
     direct.sort((a, b) => a.localeCompare(b, "zh"));
     return { ok: true, users: direct };
   }
   const nested = await propfindChildren(transport, account, `${folder}/users`);
-  if (!nested.ok) return nested;
+  if (nested.ok === false) return nested;
   const users = [...new Set([...direct, ...nested.names])];
   users.sort((a, b) => a.localeCompare(b, "zh"));
   return { ok: true, users };

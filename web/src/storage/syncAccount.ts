@@ -1,4 +1,4 @@
-import { readSyncAccount, writeSyncAccount, type SyncAccountFields } from "../domain/jianguoyun";
+import { readSyncAccount, writeSyncAccount, type SyncAccountFields } from "../domain/nutstore";
 import type { WriteStorageResult } from "./fs";
 import { readStorage, writeStorage } from "./fs";
 import { SYNC_ACCOUNT_FILENAME } from "./libraryPaths";

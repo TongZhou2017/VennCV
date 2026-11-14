@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DavTransport } from "./jianguoyun";
+import type { DavTransport } from "./nutstore";
 import { decideFile, manifestText, runUserSync, sha256Text } from "./cloudSync";
 
 const account = { email: "a@b.c", password: "secret", folder: "VennCV" };

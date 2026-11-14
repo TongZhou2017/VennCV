@@ -184,7 +184,9 @@ export function calculateProjectPosition(data: AppDataJson, projectId: string): 
       }
       if (!inOther) return [x, y];
     }
-    return [targetField.position[0], targetField.position[1]];
+    const [px, py] = project.position;
+    if (Number.isFinite(px) && Number.isFinite(py)) return [px, py];
+    return [targetField.position[0] + projectRadius + 30, targetField.position[1]];
   }
 
   const nonTargetFields = fields.filter((f) => !project.field_ids.includes(f.id));
@@ -289,7 +291,9 @@ export function calculateProjectPosition(data: AppDataJson, projectId: string): 
     return [x, y];
   }
 
-  return [ix, iy];
+  const [px, py] = project.position;
+  if (Number.isFinite(px) && Number.isFinite(py)) return [px, py];
+  return [ix + projectRadius + 30, iy];
 }
 
 /** 领域维恩几何变化后，按当前 `field_ids` 为每个项目重算位置，避免仅跑整图校验时圆落在错误区域 */

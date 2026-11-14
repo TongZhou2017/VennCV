@@ -132,10 +132,12 @@ describe("projectAuthorSatellites", () => {
     expect(projectAuthorSatellites(project, data, "primary")).toEqual([]);
     const all = projectAuthorSatellites(project, data, "all");
     expect(all).toHaveLength(3);
-    expect(all[0].dx).toBeCloseTo(0);
-    expect(all[0].dy).toBeLessThan(0);
-    const ring = Math.hypot(all[1].dx, all[1].dy);
-    expect(ring).toBeCloseTo(project.radius + 3 + all[1].radius);
+    expect(all.every((item) => item.dy < 0)).toBe(true);
+    const radii = all.map((item) => Math.hypot(item.dx, item.dy));
+    expect(radii[0]).toBeCloseTo(project.radius + 3 + all[0]!.radius);
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(0.01);
+    const angles = all.map((item) => Math.atan2(item.dy, item.dx));
+    expect(Math.max(...angles) - Math.min(...angles)).toBeLessThan(Math.PI);
     expect(all[0].color).toBe("#5c6bc0");
     expect(all.find((item) => item.personId === "person_2")?.color).toBe("#9e9e9e");
   });
@@ -172,6 +174,25 @@ describe("projectAuthorSatellites", () => {
       },
     ];
     expect(projectAuthorSatellites(project, data, "primary").map((item) => item.personId)).toEqual(["person_1"]);
+  });
+
+  it("shows every author who still has an open todo", () => {
+    const data = workspace();
+    const project = data.projects.p1;
+    project.progress_blocks = [
+      {
+        id: "b1",
+        slot_id: "s1",
+        title: "未做",
+        date: "2026-11-01",
+        due: "2026-11-20",
+        completed_on: null,
+        person_id: "person_2",
+        note: "",
+      },
+    ];
+    expect(projectAuthorSatellites(project, data, "todo").map((item) => item.personId)).toEqual(["person_2"]);
+    expect(projectAuthorSatellites(project, data, "primary")).toEqual([]);
   });
 });
 

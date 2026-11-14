@@ -331,3 +331,144 @@ export function timelineDateRatio(date: string, minDate: string, maxDate: string
   }
   return (at - start) / (end - start);
 }
+
+const DAY_MS = 86_400_000;
+const MIN_TIMELINE_SPAN_DAYS = 14;
+const MAX_TIMELINE_SPAN_DAYS = 365 * 80;
+
+/** 时间线窗口。center 落在轨道正中，spanDays 是窗口里能看到的天数。 */
+export type TimelineWindow = { center: string; spanDays: number };
+
+export type TimelineTick = { date: string; label: string };
+
+function isoFromUtc(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** 本地日历上的今天。时间跳转用这一天，不用 UTC 日期。 */
+export function todayIso(now = new Date()): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+export function timelineWindowRange(window: TimelineWindow): { start: string; end: string } {
+  const mid = utcDay(window.center);
+  const half = (window.spanDays / 2) * DAY_MS;
+  return { start: isoFromUtc(mid - half), end: isoFromUtc(mid + half) };
+}
+
+/** 把起止日期放进窗口，两端留一点空白。 */
+export function fitTimelineWindow(minDate: string, maxDate: string): TimelineWindow {
+  const start = utcDay(minDate);
+  const end = utcDay(maxDate);
+  const span = Math.max(1, Math.round((end - start) / DAY_MS) + 1);
+  const padded = Math.max(MIN_TIMELINE_SPAN_DAYS, span + 14, Math.round(span * 1.12));
+  return {
+    center: isoFromUtc(start + (end - start) / 2),
+    spanDays: Math.min(MAX_TIMELINE_SPAN_DAYS, padded),
+  };
+}
+
+/** zoomIn 为真时缩短窗口，中心日期不动。 */
+export function zoomTimelineSpan(spanDays: number, zoomIn: boolean): number {
+  const next = zoomIn ? spanDays / 1.6 : spanDays * 1.6;
+  return Math.min(MAX_TIMELINE_SPAN_DAYS, Math.max(MIN_TIMELINE_SPAN_DAYS, Math.round(next)));
+}
+
+/**
+ * 缩小的上限是全局跨度。下一步会盖住或超过全局时返回 null，调用方回到全局窗口。
+ */
+export function nextTimelineSpan(spanDays: number, zoomIn: boolean, globalSpanDays: number): number | null {
+  if (!zoomIn && spanDays >= globalSpanDays) return null;
+  const next = zoomTimelineSpan(spanDays, zoomIn);
+  if (!zoomIn && next >= globalSpanDays) return null;
+  return next;
+}
+
+export function shiftTimelineWindow(window: TimelineWindow, dayDelta: number): TimelineWindow {
+  return { ...window, center: isoFromUtc(utcDay(window.center) + dayDelta * DAY_MS) };
+}
+
+/** 窗口中心取这些日期的中点，尺度收成能放下这段时间。 */
+export function windowForProjectRange(dates: string[]): TimelineWindow | null {
+  const sorted = dates.filter((date) => Number.isFinite(utcDay(date))).sort();
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  if (!first || !last) return null;
+  const start = utcDay(first);
+  const end = utcDay(last);
+  const span = Math.max(0, Math.round((end - start) / DAY_MS));
+  const padded = Math.max(60, Math.round(span * 1.35) + 14);
+  return {
+    center: isoFromUtc(start + (end - start) / 2),
+    spanDays: Math.min(MAX_TIMELINE_SPAN_DAYS, Math.max(MIN_TIMELINE_SPAN_DAYS, padded)),
+  };
+}
+
+function steppedTicks(start: string, end: string, stepDays: number, label: (iso: string) => string): TimelineTick[] {
+  const from = utcDay(start);
+  const to = utcDay(end);
+  const ticks: TimelineTick[] = [];
+  for (let at = from + stepDays * DAY_MS; at < to && ticks.length < 8; at += stepDays * DAY_MS) {
+    const date = isoFromUtc(at);
+    ticks.push({ date, label: label(date) });
+  }
+  return ticks;
+}
+
+function monthTicks(start: string, end: string, every: number): TimelineTick[] {
+  const from = utcDay(start);
+  const to = utcDay(end);
+  const begin = new Date(from);
+  let year = begin.getUTCFullYear();
+  let month = begin.getUTCMonth() + 1;
+  if (month > 11) {
+    month = 0;
+    year += 1;
+  }
+  const ticks: TimelineTick[] = [];
+  let index = 0;
+  while (ticks.length < 8) {
+    const ms = Date.UTC(year, month, 1);
+    if (ms >= to) break;
+    if (ms > from && index % every === 0) {
+      const date = isoFromUtc(ms);
+      ticks.push({ date, label: date.slice(0, 7) });
+    }
+    index += 1;
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return ticks;
+}
+
+function yearTicks(start: string, end: string): TimelineTick[] {
+  const from = utcDay(start);
+  const to = utcDay(end);
+  const spanYears = Math.max(1, Math.round((to - from) / (365 * DAY_MS)));
+  const every = Math.max(1, Math.ceil(spanYears / 6));
+  let year = new Date(from).getUTCFullYear();
+  const ticks: TimelineTick[] = [];
+  while (year < 3000 && ticks.length < 8) {
+    const ms = Date.UTC(year, 0, 1);
+    if (ms >= to) break;
+    if (ms > from && year % every === 0) ticks.push({ date: isoFromUtc(ms), label: String(year) });
+    year += 1;
+  }
+  return ticks;
+}
+
+/** 按窗口长短选刻度。短窗口标月-日，长窗口标年。 */
+export function timelineWindowTicks(start: string, end: string): TimelineTick[] {
+  const span = Math.max(1, Math.round((utcDay(end) - utcDay(start)) / DAY_MS));
+  if (span <= 21) return steppedTicks(start, end, span <= 10 ? 1 : 2, (iso) => iso.slice(5));
+  if (span <= 120) return steppedTicks(start, end, 14, (iso) => iso.slice(5));
+  if (span <= 240) return monthTicks(start, end, 1);
+  if (span <= 800) return monthTicks(start, end, 2);
+  if (span <= 1600) return monthTicks(start, end, 3);
+  return yearTicks(start, end);
+}

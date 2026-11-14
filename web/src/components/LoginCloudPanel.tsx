@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_SYNC_FOLDER, syncFolderPath, type SyncAccountFields } from "../domain/jianguoyun";
-import { listJianguoyunUsers, testJianguoyun } from "../storage/jianguoyunClient";
+import { DEFAULT_SYNC_FOLDER, syncFolderPath, type SyncAccountFields } from "../domain/nutstore";
+import { listNutstoreUsers, testNutstore } from "../storage/nutstoreClient";
 import { loadSyncAccount, saveSyncAccount } from "../storage/syncAccount";
 
 export function LoginCloudPanel({ libraryKey }: { libraryKey: string }) {
@@ -15,7 +15,7 @@ export function LoginCloudPanel({ libraryKey }: { libraryKey: string }) {
 
   async function refreshUsers(next: SyncAccountFields): Promise<void> {
     setUserNote("");
-    const result = await listJianguoyunUsers(next);
+    const result = await listNutstoreUsers(next);
     if (!result.ok) {
       setUsers(null);
       setUserNote(result.message);
@@ -37,7 +37,7 @@ export function LoginCloudPanel({ libraryKey }: { libraryKey: string }) {
     if (!account.email || !account.password) return;
     let cancelled = false;
     setBusy(true);
-    void listJianguoyunUsers(account).then((result) => {
+    void listNutstoreUsers(account).then((result) => {
       if (cancelled) return;
       setBusy(false);
       if (!result.ok) {
@@ -167,7 +167,7 @@ export function LoginCloudPanel({ libraryKey }: { libraryKey: string }) {
             }
             setSavedPassword(next.password);
             setPassword("");
-            void testJianguoyun(next).then((result) => {
+            void testNutstore(next).then((result) => {
               if (!result.ok) {
                 setBusy(false);
                 setMessage(result.message);

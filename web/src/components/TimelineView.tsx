@@ -1,7 +1,19 @@
-import { useMemo } from "react";
+import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useAppStore } from "../store/appStore";
 import { projectStatusVisual } from "../types";
-import { buildTimelineModel, timelineAxisTicks, timelineDateRatio, type TimelinePoint } from "../domain/timeline";
+import {
+  buildTimelineModel,
+  fitTimelineWindow,
+  nextTimelineSpan,
+  shiftTimelineWindow,
+  timelineDateRatio,
+  timelineWindowRange,
+  timelineWindowTicks,
+  todayIso,
+  windowForProjectRange,
+  type TimelinePoint,
+  type TimelineWindow,
+} from "../domain/timeline";
 import { projectThroughDate } from "../domain/progress";
 import { ProgressMosaic } from "./ProgressMosaic";
 import "./timeline.css";
@@ -24,6 +36,24 @@ export function TimelineView() {
   const model = useMemo(() => buildTimelineModel(projects, grants), [grants, projects]);
   const projectCount = Object.keys(projects).length;
   const grantCount = Object.keys(grants).length;
+  const fitted = useMemo(() => {
+    const dates = [model.minDate, model.maxDate, model.grantMinDate, model.grantMaxDate]
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    if (!first || !last) return null;
+    return fitTimelineWindow(first, last);
+  }, [model.grantMaxDate, model.grantMinDate, model.maxDate, model.minDate]);
+  const [timeWindow, setTimeWindow] = useState<TimelineWindow | null>(null);
+  const activeWindow = timeWindow ?? fitted;
+  const range = activeWindow ? timelineWindowRange(activeWindow) : null;
+  const today = todayIso();
+  const selectedDates = useMemo(() => {
+    const lane = model.lanes.find((item) => item.projectId === selectedProjectId);
+    return lane?.points.map((point) => point.date) ?? [];
+  }, [model.lanes, selectedProjectId]);
+  const projectWindow = windowForProjectRange(selectedDates);
 
   const openPoint = (point: TimelinePoint) => {
     if (!point.projectId) return;
@@ -44,21 +74,110 @@ export function TimelineView() {
     );
   }
 
-  const minDate = model.minDate;
-  const maxDate = model.maxDate;
-  const grantMin = model.grantMinDate;
-  const grantMax = model.grantMaxDate;
-  const ticks = minDate && maxDate ? timelineAxisTicks(minDate, maxDate) : [];
-  const grantTicks = grantMin && grantMax ? timelineAxisTicks(grantMin, grantMax) : [];
-  const place = (date: string, from: string | null, to: string | null) => {
-    const ratio = timelineDateRatio(date, from ?? date, to ?? date);
+  const ticks = range ? timelineWindowTicks(range.start, range.end) : [];
+  const place = (date: string) => {
+    const ratio = timelineDateRatio(date, range?.start ?? date, range?.end ?? date);
     return `calc(${TRACK_PAD}px + (100% - ${TRACK_PAD * 2}px) * ${ratio})`;
   };
-  const pointLeft = (date: string) => place(date, minDate, maxDate);
-  const grantLeft = (date: string) => place(date, grantMin, grantMax);
+  const pointLeft = (date: string) => place(date);
+  const inWindow = (date: string) => {
+    if (!range) return false;
+    const ratio = timelineDateRatio(date, range.start, range.end);
+    return ratio >= 0 && ratio <= 1;
+  };
+  const segmentStyle = (from: string, to: string) => {
+    if (!range) return null;
+    const startRatio = timelineDateRatio(from, range.start, range.end);
+    const endRatio = timelineDateRatio(to, range.start, range.end);
+    const left = Math.min(startRatio, endRatio);
+    const right = Math.max(startRatio, endRatio);
+    if (right < 0 || left > 1) return null;
+    const clippedLeft = Math.max(0, left);
+    const clippedRight = Math.min(1, right);
+    return {
+      left: `calc(${TRACK_PAD}px + (100% - ${TRACK_PAD * 2}px) * ${clippedLeft})`,
+      width: `calc((100% - ${TRACK_PAD * 2}px) * ${Math.max(0, clippedRight - clippedLeft)})`,
+    };
+  };
+  const showToday = range ? inWindow(today) : false;
+  const zoomTime = (zoomIn: boolean) => {
+    if (!activeWindow || !fitted) return;
+    const next = nextTimelineSpan(activeWindow.spanDays, zoomIn, fitted.spanDays);
+    if (next === null) {
+      setTimeWindow(null);
+      return;
+    }
+    setTimeWindow({ ...activeWindow, spanDays: next });
+  };
+  const onAxisPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!activeWindow || event.button !== 0) return;
+    event.preventDefault();
+    const width = event.currentTarget.getBoundingClientRect().width;
+    const originX = event.clientX;
+    const origin = activeWindow;
+    const move = (ev: PointerEvent) => {
+      const days = (-(ev.clientX - originX) / Math.max(width, 1)) * origin.spanDays;
+      setTimeWindow(shiftTimelineWindow(origin, days));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const renderAxis = () => (
+    <div className="timeline-axis" onPointerDown={onAxisPointerDown} title="拖动可移动时间窗口">
+      {showToday ? <span className="timeline-today" style={{ left: pointLeft(today) }} title="今天" /> : null}
+      {ticks.map((tick) => (
+        <span key={tick.date} className="timeline-tick" style={{ left: pointLeft(tick.date) }}>
+          {tick.label}
+        </span>
+      ))}
+    </div>
+  );
 
   return (
     <div className="timeline-page">
+      {activeWindow ? (
+        <div className="timeline-scale" role="toolbar" aria-label="时间尺度">
+          <button type="button" aria-label="放大时间尺度" title="看更短的一段时间" onClick={() => zoomTime(true)}>
+            +
+          </button>
+          <button type="button" aria-label="缩小时间尺度" title="看更长的一段时间，最多回到全部时间" onClick={() => zoomTime(false)}>
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="回到全局尺度"
+            title="回到全部时间"
+            disabled={timeWindow === null}
+            onClick={() => setTimeWindow(null)}
+          >
+            全局
+          </button>
+          <button
+            type="button"
+            aria-label="跳到今天"
+            title="窗口中心跳到今天"
+            onClick={() => setTimeWindow({ center: today, spanDays: activeWindow.spanDays })}
+          >
+            今天
+          </button>
+          <button
+            type="button"
+            aria-label="跳到选中项目"
+            title={projectWindow ? "窗口对准选中项目的时间范围" : "先选中一个有日期的项目"}
+            disabled={!projectWindow}
+            onClick={() => {
+              if (projectWindow) setTimeWindow(projectWindow);
+            }}
+          >
+            项目
+          </button>
+        </div>
+      ) : null}
       <div className="timeline-scroll">
         {model.lanes.length === 0 && model.grantLanes.length === 0 ? (
           <p className="timeline-empty">横轴上还没有日期。没有填写时间的项目列在下方。</p>
@@ -66,15 +185,7 @@ export function TimelineView() {
           <>
           {model.lanes.length > 0 ? (
           <div className="timeline-board">
-            {ticks.length > 0 ? (
-              <div className="timeline-axis">
-                {ticks.map((tick) => (
-                  <span key={tick} className="timeline-tick" style={{ left: pointLeft(tick) }}>
-                    {tick}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            {renderAxis()}
             {model.lanes.map((lane) => {
               const visual = projectStatusVisual(lane.status);
               const selected = lane.projectId === selectedProjectId;
@@ -112,7 +223,7 @@ export function TimelineView() {
                                   points={track.points
                                     .map((point) => {
                                       const x =
-                                        timelineDateRatio(point.date, minDate ?? point.date, maxDate ?? point.date) * 100;
+                                        timelineDateRatio(point.date, range?.start ?? point.date, range?.end ?? point.date) * 100;
                                       return `${x},${100 - (point.level ?? 0)}`;
                                     })
                                     .join(" ")}
@@ -123,7 +234,7 @@ export function TimelineView() {
                                 />
                               ) : null}
                             </svg>
-                            {track.points.map((point) => (
+                            {track.points.filter((point) => inWindow(point.date)).map((point) => (
                               <span
                                 key={point.key}
                                 className="timeline-point is-progress"
@@ -158,27 +269,13 @@ export function TimelineView() {
                             {track.url ? <span className="timeline-url">{track.url}</span> : null}
                           </span>
                         )}
-                        {track.points.length > 1 ? (
+                        {track.points.length > 1 && segmentStyle(track.points[0].date, track.points[track.points.length - 1].date) ? (
                           <span
                             className="timeline-line"
-                            style={{
-                              left: pointLeft(track.points[0].date),
-                              width: `calc((100% - ${TRACK_PAD * 2}px) * ${
-                                timelineDateRatio(
-                                  track.points[track.points.length - 1].date,
-                                  minDate ?? track.points[track.points.length - 1].date,
-                                  maxDate ?? track.points[track.points.length - 1].date,
-                                ) -
-                                timelineDateRatio(
-                                  track.points[0].date,
-                                  minDate ?? track.points[0].date,
-                                  maxDate ?? track.points[0].date,
-                                )
-                              })`,
-                            }}
+                            style={segmentStyle(track.points[0].date, track.points[track.points.length - 1].date) ?? undefined}
                           />
                         ) : null}
-                        {track.points.map((point) => (
+                        {track.points.filter((point) => inWindow(point.date)).map((point) => (
                           <span key={point.key} className="timeline-point" style={{ left: pointLeft(point.date) }}>
                             <span
                               className="timeline-dot"
@@ -205,15 +302,7 @@ export function TimelineView() {
           {model.grantLanes.length > 0 ? (
             <div className="timeline-board">
             <h2 className="timeline-section">基金</h2>
-            {grantTicks.length > 0 ? (
-              <div className="timeline-axis">
-                {grantTicks.map((tick) => (
-                  <span key={tick} className="timeline-tick" style={{ left: grantLeft(tick) }}>
-                    {tick}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            {renderAxis()}
             {model.grantLanes.map((lane) => (
               <div key={lane.grantId} className="timeline-lane is-grant">
                 <span>
@@ -224,32 +313,18 @@ export function TimelineView() {
                   {lane.tracks.map((track) => (
                     <span key={track.key} className="timeline-track">
                       <span className="timeline-track-label">{track.label}</span>
-                      {track.points.length > 1 ? (
+                      {track.points.length > 1 && segmentStyle(track.points[0].date, track.points[track.points.length - 1].date) ? (
                         <span
                           className="timeline-line"
-                          style={{
-                            left: grantLeft(track.points[0].date),
-                            width: `calc((100% - ${TRACK_PAD * 2}px) * ${
-                              timelineDateRatio(
-                                track.points[track.points.length - 1].date,
-                                grantMin ?? track.points[track.points.length - 1].date,
-                                grantMax ?? track.points[track.points.length - 1].date,
-                              ) -
-                              timelineDateRatio(
-                                track.points[0].date,
-                                grantMin ?? track.points[0].date,
-                                grantMax ?? track.points[0].date,
-                              )
-                            })`,
-                          }}
+                          style={segmentStyle(track.points[0].date, track.points[track.points.length - 1].date) ?? undefined}
                         />
                       ) : null}
-                      {track.points.map((point) => (
+                      {track.points.filter((point) => inWindow(point.date)).map((point) => (
                         <button
                           key={point.key}
                           type="button"
                           className={point.muted ? "timeline-point is-muted" : "timeline-point"}
-                          style={{ left: grantLeft(point.date) }}
+                          style={{ left: pointLeft(point.date) }}
                           onClick={() => openPoint(point)}
                         >
                           <span

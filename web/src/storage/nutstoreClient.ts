@@ -6,19 +6,19 @@ import {
 } from "../domain/cloudSync";
 import {
   isSafeDavPath,
-  listJianguoyunUsers as listRemoteUsers,
-  probeJianguoyun,
+  listNutstoreUsers as listRemoteUsers,
+  probeNutstore,
   type DavCall,
   type DavResponse,
   type SyncAccountFields,
-} from "../domain/jianguoyun";
+} from "../domain/nutstore";
 import { isTauriApp } from "../platform/tauri";
 
 async function transport(call: DavCall): Promise<DavResponse> {
   if (!isSafeDavPath(call.path)) return { status: 0, body: "远程路径无效" };
   if (isTauriApp()) {
     try {
-      return await invoke<DavResponse>("jianguoyun_webdav", {
+      return await invoke<DavResponse>("nutstore_webdav", {
         method: call.method,
         path: call.path,
         body: call.body ?? null,
@@ -34,7 +34,7 @@ async function transport(call: DavCall): Promise<DavResponse> {
   }
   let response: Response;
   try {
-    response = await fetch("/__venncv/jianguoyun", {
+    response = await fetch("/__venncv/nutstore", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -65,17 +65,17 @@ async function transport(call: DavCall): Promise<DavResponse> {
   };
 }
 
-export function testJianguoyun(account: SyncAccountFields): Promise<{ ok: true } | { ok: false; message: string }> {
-  return probeJianguoyun(transport, account);
+export function testNutstore(account: SyncAccountFields): Promise<{ ok: true } | { ok: false; message: string }> {
+  return probeNutstore(transport, account);
 }
 
-export function listJianguoyunUsers(
+export function listNutstoreUsers(
   account: SyncAccountFields,
 ): Promise<{ ok: true; users: string[] } | { ok: false; message: string }> {
   return listRemoteUsers(transport, account);
 }
 
-export function syncJianguoyunUser(
+export function syncNutstoreUser(
   account: SyncAccountFields,
   username: string,
   localFiles: Record<string, string>,

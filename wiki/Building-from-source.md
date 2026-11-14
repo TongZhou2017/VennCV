@@ -40,7 +40,7 @@ cargo build
 cargo test
 ```
 
-数据模型等在 `src/`；与 Web 端 JSON 约定见代码与 [CHANGELOG.md](https://github.com/TongZhou2017/VennCV/blob/main/CHANGELOG.md)。
+数据模型等在 `src/`；与 Web 端 JSON 约定见代码与 [CHANGELOG.md](https://github.com/TongZhou2017/VennCV/blob/master/CHANGELOG.md)。
 
 ## 遗留 Trunk（egui WASM）
 
@@ -54,7 +54,7 @@ trunk build
 trunk serve
 ```
 
-- 配置：[legacy/wasm/Trunk.toml](https://github.com/TongZhou2017/VennCV/blob/main/legacy/wasm/Trunk.toml)
+- 配置：[legacy/wasm/Trunk.toml](https://github.com/TongZhou2017/VennCV/blob/master/legacy/wasm/Trunk.toml)
 - 入口 HTML 通过 `../../Cargo.toml` 引用仓库根 `Cargo.toml`
 - 构建产物输出到 `legacy/wasm/dist/`（已在 `.gitignore` 中）
 

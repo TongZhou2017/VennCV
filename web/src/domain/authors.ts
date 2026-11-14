@@ -824,15 +824,35 @@ export function hasOpenAuthorTodo(project: Pick<Project, "progress_blocks">, per
   return (project.progress_blocks ?? []).some((block) => block.person_id === personId && !isBlockDone(block));
 }
 
+function authorshipOnCanvas(
+  mode: AuthorDisplayMode,
+  project: Pick<Project, "progress_blocks">,
+  link: { person_id: string; primary: boolean },
+): boolean {
+  switch (mode) {
+    case "off":
+      return false;
+    case "todo":
+      return hasOpenAuthorTodo(project, link.person_id);
+    case "primary":
+      return link.primary && hasOpenAuthorTodo(project, link.person_id);
+    case "all":
+      return true;
+    default: {
+      const unreachable: never = mode;
+      return unreachable;
+    }
+  }
+}
+
 export function projectAuthorSatellites(
   project: Pick<Project, "id" | "radius" | "progress_blocks">,
   data: Pick<AppDataJson, "people" | "labs" | "authorships">,
   mode: AuthorDisplayMode,
 ): AuthorSatellite[] {
-  if (mode === "off") return [];
   const links = data.authorships
     .filter((link) => link.project_id === project.id && data.people[link.person_id])
-    .filter((link) => mode === "all" || (link.primary && hasOpenAuthorTodo(project, link.person_id)))
+    .filter((link) => authorshipOnCanvas(mode, project, link))
     .slice()
     .sort((a, b) => {
       if (a.position !== b.position) return a.position - b.position;
@@ -843,10 +863,12 @@ export function projectAuthorSatellites(
   if (links.length === 0) return [];
   const radius = Math.max(6, Math.min(11, project.radius * 0.42));
   const ring = project.radius + SATELLITE_GAP + radius;
+  const shoulder = -2.15;
+  const span = Math.min(1.15, Math.max(0, links.length - 1) * 0.62);
   return links.map((link, index) => {
     const person = data.people[link.person_id];
     const lab = person.lab_ids.map((id) => data.labs[id]).find((item) => item);
-    const angle = -Math.PI / 2 + (2 * Math.PI * index) / links.length;
+    const angle = shoulder - span / 2 + (links.length === 1 ? 0 : (span * index) / (links.length - 1));
     return {
       personId: person.id,
       name: person.name,
@@ -857,6 +879,19 @@ export function projectAuthorSatellites(
       radius,
     };
   });
+}
+
+/** 碰撞半径含当前会画出来的作者环。作者环画在项目圆外。 */
+export function projectCollisionRadius(
+  project: Pick<Project, "id" | "radius" | "progress_blocks">,
+  data: Pick<AppDataJson, "people" | "labs" | "authorships">,
+  mode: AuthorDisplayMode,
+): number {
+  let radius = project.radius;
+  for (const satellite of projectAuthorSatellites(project, data, mode)) {
+    radius = Math.max(radius, Math.hypot(satellite.dx, satellite.dy) + satellite.radius);
+  }
+  return radius;
 }
 
 export interface PersonProjectProgress {

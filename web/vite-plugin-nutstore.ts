@@ -1,6 +1,6 @@
 import { request as httpsRequest } from "node:https";
 import type { Connect, Plugin, PreviewServer, ViteDevServer } from "vite";
-import { JIANGUOYUN_DAV_ROOT, isSafeDavPath, type DavMethod } from "./src/domain/jianguoyun";
+import { NUTSTORE_DAV_ROOT, isSafeDavPath, type DavMethod } from "./src/domain/nutstore";
 
 type DavRequest = {
   url?: string;
@@ -20,7 +20,7 @@ type DavResponse = {
   end(body?: string): void;
 };
 
-const ROUTE = "/__venncv/jianguoyun";
+const ROUTE = "/__venncv/nutstore";
 const METHODS = new Set<DavMethod>(["MKCOL", "PUT", "GET", "DELETE", "PROPFIND"]);
 
 function isLoopback(req: DavRequest): boolean {
@@ -76,7 +76,7 @@ function sendText(res: DavResponse, status: number, message: string): void {
 
 function davUrl(method: DavMethod, path: string): string {
   const encoded = path.split("/").map((part) => encodeURIComponent(part)).join("/");
-  return method === "MKCOL" || method === "PROPFIND" ? `${JIANGUOYUN_DAV_ROOT}${encoded}/` : `${JIANGUOYUN_DAV_ROOT}${encoded}`;
+  return method === "MKCOL" || method === "PROPFIND" ? `${NUTSTORE_DAV_ROOT}${encoded}/` : `${NUTSTORE_DAV_ROOT}${encoded}`;
 }
 
 function isDavMethod(method: string): method is DavMethod {
@@ -212,9 +212,9 @@ function attach(middlewares: Connect.Server): void {
   });
 }
 
-export function jianguoyunPlugin(): Plugin {
+export function nutstorePlugin(): Plugin {
   return {
-    name: "venncv-jianguoyun",
+    name: "venncv-nutstore",
     configureServer(server: ViteDevServer) {
       attach(server.middlewares);
     },

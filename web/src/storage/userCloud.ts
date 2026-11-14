@@ -1,7 +1,7 @@
 import { normalizeAppData } from "../domain/appData";
 import type { SyncBase } from "../domain/cloudSync";
-import { syncAccountError } from "../domain/jianguoyun";
-import { syncJianguoyunUser } from "./jianguoyunClient";
+import { syncAccountError } from "../domain/nutstore";
+import { syncNutstoreUser } from "./nutstoreClient";
 import { listUserFileNames, readStorage, writeStorage } from "./fs";
 import {
   CLOUD_CONFLICT_FILENAME,
@@ -232,7 +232,7 @@ async function performSync(username: string): Promise<CloudSyncNotice> {
     }
     const stored = readSyncBase(username);
     const base = stored ? { generation: stored.generation, files: stored.files } : null;
-    const result = await syncJianguoyunUser(account, username, localFiles, base, readBaseFiles(username));
+    const result = await syncNutstoreUser(account, username, localFiles, base, readBaseFiles(username));
     if (!result.ok) return finish({ ok: false, status: "failed", message: result.message, downloaded: false });
     switch (result.status) {
       case "stale":

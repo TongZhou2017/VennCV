@@ -1,4 +1,4 @@
-mod jianguoyun;
+mod nutstore;
 mod user_library;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -117,7 +117,7 @@ pub fn run() {
             user_library::user_library_switch,
             user_library::user_library_forget,
             user_library::user_library_write,
-            jianguoyun::jianguoyun_webdav,
+            nutstore::nutstore_webdav,
         ])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();

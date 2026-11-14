@@ -424,7 +424,7 @@ export function AuthorPanel() {
               return (
                 <button key={item.id} type="button" className="author-project" onClick={() => selectProject(item.id)}>
                   <span>{item.name}</span>
-                  <span style={{ color: meta.fill === "#ffffff" ? "#333" : meta.fill }}>{meta.label}</span>
+                  <span style={{ color: meta.text === "#fff" ? meta.fill : meta.text }}>{meta.label}</span>
                   <span>{Math.round(effectiveCompletion(item))}%</span>
                   {formatPaperRoles(link.paper_roles, data.labs, data.people) ? (
                     <span>{formatPaperRoles(link.paper_roles, data.labs, data.people)}</span>

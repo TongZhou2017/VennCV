@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { jianguoyunPlugin } from "./vite-plugin-jianguoyun";
+import { nutstorePlugin } from "./vite-plugin-nutstore";
 import { userLibraryPlugin } from "./vite-plugin-user-library";
 
 export default defineConfig({
-  plugins: [react(), userLibraryPlugin(), jianguoyunPlugin()],
+  plugins: [react(), userLibraryPlugin(), nutstorePlugin()],
   // 桌面端打包用相对路径。网页用根路径，这样 /leisun 也能载入脚本。
   base: process.env.TAURI_ENV_PLATFORM ? "./" : "/",
   server: {

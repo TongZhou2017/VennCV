@@ -1,5 +1,5 @@
 import { flushSync } from "react-dom";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { useAppStore } from "../store/appStore";
 import type { AppDataJson, AppSettings, ResearchField } from "../types";
 import { PROJECT_STATUS_META, projectStatusVisual, rgbaToCss } from "../types";
@@ -15,6 +15,14 @@ import {
 } from "../viz/layout";
 import { projectAuthorSatellites } from "../domain/authors";
 import { effectiveCompletion } from "../domain/progress";
+import { textWidth } from "../viz/projectLabelLayout";
+import { FIELD_LABEL_FONT, LEGEND_BOX, type SceneLabels } from "../viz/sceneSpace";
+import {
+  relationLabelPoint,
+  SELECTION_RING,
+  type SceneDragPhase,
+  type ScenePose,
+} from "../viz/sceneMotion";
 
 function clientToSvgCoords(
   svg: SVGSVGElement,
@@ -39,10 +47,13 @@ type Props = {
   relationDraftFromId: string | null;
   wireEnd: { x: number; y: number } | null;
   wireIndirectPreview: boolean;
-  nameLabelDy: Record<string, number>;
+  sceneLabels: SceneLabels;
+  pose: ScenePose | null;
+  onDragProject: (phase: SceneDragPhase, id: string, pos: [number, number]) => void;
   setWireEnd: (p: { x: number; y: number } | null) => void;
   setWireIndirectPreview: (v: boolean) => void;
-  onBeginPan: (clientX: number, clientY: number) => void;
+  onBeginPan: (clientX: number, clientY: number, pointerId: number) => void;
+  onLegendPointerDown: (clientX: number, clientY: number) => void;
 };
 
 export function VisualizationSvg({
@@ -59,10 +70,13 @@ export function VisualizationSvg({
   relationDraftFromId,
   wireEnd,
   wireIndirectPreview,
-  nameLabelDy,
+  sceneLabels,
+  pose,
+  onDragProject,
   setWireEnd,
   setWireIndirectPreview,
   onBeginPan,
+  onLegendPointerDown,
 }: Props) {
   const authorDisplay = useAppStore((s) => s.authorDisplay);
   const selectedPersonId = useAppStore((s) => s.selectedPersonId);
@@ -77,9 +91,14 @@ export function VisualizationSvg({
   zoomRef.current = zoom;
   panRef.current = pan;
   dataRef.current = data;
+  const screenOf = (project: { id: string; position: [number, number] }) => {
+    const pos = pose?.[project.id] ?? project.position;
+    return dataToScreen(pos[0], pos[1], layout, zoom, pan);
+  };
 
-  const [dragPos, setDragPos] = useState<{ id: string; cx: number; cy: number } | null>(null);
   const suppressNextClickRef = useRef(false);
+  const onDragProjectRef = useRef(onDragProject);
+  onDragProjectRef.current = onDragProject;
 
   const onWirePointerMove = useCallback(
     (e: PointerEvent) => {
@@ -134,37 +153,36 @@ export function VisualizationSvg({
   const startProjectDrag = useCallback(
     (projId: string, startClientX: number, startClientY: number) => {
       let moved = false;
+      const project = dataRef.current.projects[projId];
+      const origin = project?.position ?? [0, 0];
+      onDragProjectRef.current("start", projId, origin);
       const onMove = (ev: PointerEvent) => {
         const svg = svgRef.current;
         if (!svg) return;
-        if (
-          Math.hypot(ev.clientX - startClientX, ev.clientY - startClientY) > 4
-        ) {
+        if (Math.hypot(ev.clientX - startClientX, ev.clientY - startClientY) > 4) {
           moved = true;
         }
         const p = clientToSvgCoords(svg, ev.clientX, ev.clientY);
-        setDragPos({ id: projId, cx: p.x, cy: p.y });
+        const [dx, dy] = screenToData(p.x, p.y, layoutRef.current, zoomRef.current, panRef.current);
+        onDragProjectRef.current("move", projId, [dx, dy]);
       };
       const onUp = (ev: PointerEvent) => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
-        setDragPos(null);
-        if (moved) {
-          suppressNextClickRef.current = true;
-          const svg = svgRef.current;
-          if (svg) {
-            const p = clientToSvgCoords(svg, ev.clientX, ev.clientY);
-            const [dx, dy] = screenToData(
-              p.x,
-              p.y,
-              layoutRef.current,
-              zoomRef.current,
-              panRef.current,
-            );
-            useAppStore.getState().setProjectPosition(projId, [dx, dy]);
-          }
+        if (!moved) {
+          onDragProjectRef.current("cancel", projId, origin);
+          return;
         }
+        suppressNextClickRef.current = true;
+        const svg = svgRef.current;
+        if (!svg) {
+          onDragProjectRef.current("cancel", projId, origin);
+          return;
+        }
+        const p = clientToSvgCoords(svg, ev.clientX, ev.clientY);
+        const [dx, dy] = screenToData(p.x, p.y, layoutRef.current, zoomRef.current, panRef.current);
+        onDragProjectRef.current("end", projId, [dx, dy]);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
@@ -193,15 +211,17 @@ export function VisualizationSvg({
         width={size.w}
         height={size.h}
         fill={bg}
+        style={{ cursor: "grab", touchAction: "none" }}
         onPointerDown={(e) => {
-          if (e.button === 1 || (e.button === 0 && e.altKey)) {
-            e.preventDefault();
-            onBeginPan(e.clientX, e.clientY);
-          }
+          if (e.button === 2) return;
+          if (e.button === 0 && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
+          if (e.button !== 0 && e.button !== 1) return;
+          e.preventDefault();
+          onBeginPan(e.clientX, e.clientY, e.pointerId);
         }}
       />
 
-      <g className="venncv-fields">
+      <g className="venncv-fields" pointerEvents="none">
         {fieldsToDraw.map((field) => {
           const [cx, cy] = dataToScreen(field.position[0], field.position[1], layout, zoom, pan);
           const r = field.radius * layout.autoScale * zoom;
@@ -220,18 +240,17 @@ export function VisualizationSvg({
       </g>
 
       <g className="venncv-field-labels" pointerEvents="none">
-        {fieldsToDraw.map((field) => {
-          const [cx, cy] = dataToScreen(field.position[0], field.position[1], layout, zoom, pan);
-          const r = field.radius * layout.autoScale * zoom;
-          const ty = cy - r - 18;
+        {sceneLabels.fieldLabels.map((label) => {
+          const field = fieldsToDraw.find((item) => item.id === label.id);
+          if (!field) return null;
           return (
             <text
               key={`${field.id}-l`}
-              x={cx}
-              y={ty}
+              x={label.x}
+              y={label.y}
               textAnchor="middle"
               dominantBaseline="middle"
-              fontSize={14}
+              fontSize={FIELD_LABEL_FONT}
               fill="#111"
             >
               {field.name}
@@ -245,8 +264,8 @@ export function VisualizationSvg({
           const from = data.projects[rel.from_id];
           const to = data.projects[rel.to_id];
           if (!from || !to || !projectOnCanvas(from) || !projectOnCanvas(to)) return null;
-          const [fx, fy] = dataToScreen(from.position[0], from.position[1], layout, zoom, pan);
-          const [tx, ty] = dataToScreen(to.position[0], to.position[1], layout, zoom, pan);
+          const [fx, fy] = screenOf(from);
+          const [tx, ty] = screenOf(to);
           const fr = from.radius * layout.autoScale * zoom;
           const tr = to.radius * layout.autoScale * zoom;
           const dx = tx - fx;
@@ -294,8 +313,9 @@ export function VisualizationSvg({
           const to = data.projects[rel.to_id];
           if (!from || !to || rel.tags.length === 0) return null;
           if (!projectOnCanvas(from) || !projectOnCanvas(to)) return null;
-          const [fx, fy] = dataToScreen(from.position[0], from.position[1], layout, zoom, pan);
-          const [tx, ty] = dataToScreen(to.position[0], to.position[1], layout, zoom, pan);
+          if (selectedProjectId !== from.id && selectedProjectId !== to.id) return null;
+          const [fx, fy] = screenOf(from);
+          const [tx, ty] = screenOf(to);
           const fr = from.radius * layout.autoScale * zoom;
           const tr = to.radius * layout.autoScale * zoom;
           const dx = tx - fx;
@@ -307,23 +327,30 @@ export function VisualizationSvg({
           const y1 = fy + uy * fr;
           const x2 = tx - ux * tr;
           const y2 = ty - uy * tr;
-          const px = -uy;
-          const py = ux;
-          const mx = (x1 + x2) / 2 + px * 15;
-          const my = (y1 + y2) / 2 + py * 15;
+          const labelAt = relationLabelPoint(x1, y1, x2, y2);
           const text = rel.tags.join(", ");
+          const labelW = textWidth(text, 10);
           return (
-            <text
-              key={`rel-t-${i}`}
-              x={mx}
-              y={my}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontSize={10}
-              fill="#444"
-            >
-              {text}
-            </text>
+            <g key={`rel-t-${i}`}>
+              <rect
+                x={labelAt.x - labelW / 2 - 4}
+                y={labelAt.y - 8}
+                width={labelW + 8}
+                height={16}
+                rx={3}
+                fill="rgba(255,255,255,0.92)"
+              />
+              <text
+                x={labelAt.x}
+                y={labelAt.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={10}
+                fill="#444"
+              >
+                {text}
+              </text>
+            </g>
           );
         })}
       </g>
@@ -331,14 +358,14 @@ export function VisualizationSvg({
       {relationDraftFromId && wireEnd ? (() => {
         const from = data.projects[relationDraftFromId];
         if (!from) return null;
-        const [x1, y1] = dataToScreen(from.position[0], from.position[1], layout, zoom, pan);
+        const [x1, y1] = screenOf(from);
         return (
           <line
             x1={x1}
             y1={y1}
             x2={wireEnd.x}
             y2={wireEnd.y}
-            stroke="#007acc"
+            stroke={SELECTION_RING}
             strokeWidth={2}
             strokeLinecap="round"
             strokeDasharray={wireIndirectPreview ? "6 6" : undefined}
@@ -351,14 +378,12 @@ export function VisualizationSvg({
         {Object.values(data.projects)
           .filter(projectOnCanvas)
           .map((proj) => {
-          const [sx, sy] = dataToScreen(proj.position[0], proj.position[1], layout, zoom, pan);
+          const [cx, cy] = screenOf(proj);
           const r = proj.radius * layout.autoScale * zoom;
           const meta = projectStatusVisual(proj.status);
           const strokeW = settings.project_border_width;
           const sel = selectedProjectId === proj.id;
           const inMulti = multiSelectedProjectIds.includes(proj.id);
-          const cx = dragPos?.id === proj.id ? dragPos.cx : sx;
-          const cy = dragPos?.id === proj.id ? dragPos.cy : sy;
           const completionStroke = completionPercentageToCss(effectiveCompletion(proj));
           return (
             <g key={proj.id}>
@@ -379,7 +404,7 @@ export function VisualizationSvg({
                   cy={cy}
                   r={r + 3}
                   fill="none"
-                  stroke="#007acc"
+                  stroke={SELECTION_RING}
                   strokeWidth={3}
                   pointerEvents="none"
                 />
@@ -477,22 +502,17 @@ export function VisualizationSvg({
 
       {settings.show_project_names ? (
         <g className="venncv-project-names" pointerEvents="none">
-          {Object.values(data.projects)
-            .filter(projectOnCanvas)
-            .map((proj) => {
-            const [sx, sy] = dataToScreen(proj.position[0], proj.position[1], layout, zoom, pan);
-            const r = proj.radius * layout.autoScale * zoom;
-            const extraY = nameLabelDy[proj.id] ?? 0;
-            const px = dragPos?.id === proj.id ? dragPos.cx : sx;
-            const py = dragPos?.id === proj.id ? dragPos.cy : sy;
+          {sceneLabels.names.map((place) => {
+            const proj = data.projects[place.id];
+            if (!proj) return null;
             return (
               <text
                 key={`${proj.id}-n`}
-                x={px}
-                y={py + r + 14 + extraY}
-                textAnchor="middle"
+                x={place.x}
+                y={place.y}
+                textAnchor={place.anchor}
                 dominantBaseline="middle"
-                fontSize={12}
+                fontSize={place.fontSize}
                 fill="#111"
               >
                 {proj.name}
@@ -504,21 +524,29 @@ export function VisualizationSvg({
 
       {settings.show_legend ? (() => {
         const statusKeys = Object.keys(PROJECT_STATUS_META) as (keyof typeof PROJECT_STATUS_META)[];
-        const legendW = 126;
-        const legendX = size.w - legendW - 10;
-        const legendY = 12;
-        const titleY = 26;
-        const statusLabelY = 40;
-        const statusRow0 = 54;
+        const legendW = LEGEND_BOX.w;
+        const legendH = LEGEND_BOX.h;
+        const legendX = sceneLabels.legendAt.x;
+        const legendY = sceneLabels.legendAt.y;
+        const titleY = legendY + 14;
+        const statusLabelY = legendY + 28;
+        const statusRow0 = legendY + 42;
         const rowStep = 18;
         const completionTitleY = statusRow0 + statusKeys.length * rowStep + 8;
         const completionRow0 = completionTitleY + 14;
         const completionExamples = [0, 50, 100] as const;
-        const legendH =
-          completionRow0 + completionExamples.length * rowStep + 8 - legendY;
         const cx0 = legendX + 16;
         return (
-          <g className="venncv-legend" pointerEvents="none">
+          <g
+            className="venncv-legend"
+            style={{ cursor: "grab", touchAction: "none" }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onLegendPointerDown(event.clientX, event.clientY);
+            }}
+          >
             <rect
               x={legendX}
               y={legendY}

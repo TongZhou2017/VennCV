@@ -5,6 +5,21 @@ import { projectStatusVisual } from "../types";
 const ROW_H = 28;
 const DRAG_THRESHOLD_PX = 6;
 
+function CanvasEye({ hidden }: { hidden: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+      <path
+        d="M1.6 8s2.3-3.6 6.4-3.6S14.4 8 14.4 8 12.1 11.6 8 11.6 1.6 8 1.6 8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <circle cx="8" cy="8" r="1.7" fill="currentColor" />
+      {hidden ? <path d="M3.2 12.8 12.8 3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /> : null}
+    </svg>
+  );
+}
+
 type ReorderDrag =
   | { kind: "field"; id: string }
   | { kind: "project"; id: string };
@@ -20,6 +35,7 @@ export function LeftSidebar() {
   const reorderProjects = useAppStore((s) => s.reorderProjects);
   const addProject = useAppStore((s) => s.addProject);
   const removeProject = useAppStore((s) => s.removeProject);
+  const setProjectsCanvasHidden = useAppStore((s) => s.setProjectsCanvasHidden);
   const selectProject = useAppStore((s) => s.selectProject);
   const selectedProjectId = useAppStore((s) => s.selectedProjectId);
   const multiSelectedProjectIds = useAppStore((s) => s.multiSelectedProjectIds);
@@ -203,7 +219,7 @@ export function LeftSidebar() {
           </button>
         </div>
         <div style={{ fontSize: 10, color: "#999", marginTop: 4, lineHeight: 1.35 }}>
-          Shift+点击多选；× 移入回收站（可复原）。画布隐藏见右侧属性。
+          Shift+点击多选；× 移入回收站（可复原）。眼睛控制是否画在图上。
         </div>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -231,7 +247,7 @@ export function LeftSidebar() {
                   onKeyDown={(e) => e.key === "Enter" && selectProject(pid)}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "16px 28px 1fr auto auto",
+                    gridTemplateColumns: "16px 18px 28px 1fr auto auto",
                     gap: 4,
                     alignItems: "center",
                     padding: "6px 8px",
@@ -257,14 +273,35 @@ export function LeftSidebar() {
                   >
                     ⋮
                   </span>
+                  <button
+                    type="button"
+                    aria-label={p.canvas_hidden === true ? "在画布上显示" : "在画布上隐藏"}
+                    title={p.canvas_hidden === true ? "在画布上显示" : "在画布上隐藏"}
+                    aria-pressed={p.canvas_hidden === true}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setProjectsCanvasHidden([pid], p.canvas_hidden !== true);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 18,
+                      height: 18,
+                      padding: 0,
+                      border: "none",
+                      background: "none",
+                      color: p.canvas_hidden === true ? "#b5b5b5" : "#555",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <CanvasEye hidden={p.canvas_hidden === true} />
+                  </button>
                   <span style={{ fontSize: 11, color: "#888", textAlign: "right", userSelect: "none" }}>
                     {idx + 1}.
                   </span>
                   <span className="minw0" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {p.name}
-                    {p.canvas_hidden === true ? (
-                      <span style={{ fontSize: 10, color: "#999", marginLeft: 4 }}>（画布隐藏）</span>
-                    ) : null}
                   </span>
                   <span
                     style={{

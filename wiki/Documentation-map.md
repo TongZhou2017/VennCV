@@ -6,8 +6,8 @@
 
 | 文件 | 说明 |
 |------|------|
-| [CHANGELOG.md](https://github.com/TongZhou2017/VennCV/blob/main/CHANGELOG.md) | 版本变更与用户可见特性 |
-| [README.md](https://github.com/TongZhou2017/VennCV/blob/main/README.md) | 面向**最终用户**的说明 |
+| [CHANGELOG.md](https://github.com/TongZhou2017/VennCV/blob/master/CHANGELOG.md) | 版本变更与用户可见特性 |
+| [README.md](https://github.com/TongZhou2017/VennCV/blob/master/README.md) | 面向**最终用户**的说明 |
 
 ## 本 Wiki
 
@@ -15,4 +15,4 @@
 
 ## Wiki 源文件
 
-本 Wiki 的 Markdown 源文件位于 [`wiki/`](https://github.com/TongZhou2017/VennCV/tree/main/wiki)，同步方式见该目录下的 [README](https://github.com/TongZhou2017/VennCV/blob/main/wiki/README.md)。
+本 Wiki 的 Markdown 源文件位于 [`wiki/`](https://github.com/TongZhou2017/VennCV/tree/master/wiki)，同步方式见该目录下的 [README](https://github.com/TongZhou2017/VennCV/blob/master/wiki/README.md)。

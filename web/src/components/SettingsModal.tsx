@@ -4,6 +4,7 @@ import { resolveWorkspaceStorageKey } from "../storage/config";
 import { listUserWorkspaceJsonFiles } from "../storage/fs";
 import { diskPathForLogical, getRuntimeStorageInfo } from "../storage/runtimeStorage";
 import { useAppStore } from "../store/appStore";
+import { coerceAuthorDisplayMode } from "../types";
 
 type Props = {
   open: boolean;
@@ -19,6 +20,8 @@ export function SettingsModal({ open, onClose }: Props) {
     (s) => s.duplicateCurrentWorkspaceAsNewFile,
   );
   const showBannerNotice = useAppStore((s) => s.showBannerNotice);
+  const authorDisplay = useAppStore((s) => s.authorDisplay);
+  const setAuthorDisplay = useAppStore((s) => s.setAuthorDisplay);
 
   const [workspaceCandidates, setWorkspaceCandidates] = useState<string[]>([]);
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState("");
@@ -218,6 +221,23 @@ export function SettingsModal({ open, onClose }: Props) {
           </div>
         ) : null}
 
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, marginBottom: 6 }}>
+          <span>作者</span>
+          <select
+            aria-label="作者显示"
+            value={authorDisplay}
+            onChange={(event) => setAuthorDisplay(coerceAuthorDisplayMode(event.target.value))}
+            style={{ fontSize: 13, padding: "4px 8px" }}
+          >
+            <option value="todo">有待办</option>
+            <option value="primary">主要</option>
+            <option value="all">全部</option>
+            <option value="off">不显示</option>
+          </select>
+        </label>
+        <p style={{ fontSize: 11, color: "#888", margin: "0 0 12px", lineHeight: 1.5 }}>
+          默认只画出这个项目上还有未完成待办的人。主要是其中的共同第一和通讯作者。
+        </p>
         {row("显示项目名称", (
           <input
             type="checkbox"
