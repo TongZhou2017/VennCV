@@ -8,6 +8,7 @@ const MAX_LIBRARY_ROOTS: usize = 12;
 static CURRENT_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 const CONFIG_FILE: &str = "config.yaml";
+const SYNC_ACCOUNT_FILE: &str = "sync_account.json";
 const MAX_LIBRARY_FILE_BYTES: u64 = 32 * 1024 * 1024;
 
 fn is_safe_username(name: &str) -> bool {
@@ -42,7 +43,7 @@ fn is_allowed_library_path(logical: &str) -> bool {
     if n.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
         return false;
     }
-    if n == CONFIG_FILE {
+    if n == CONFIG_FILE || n == SYNC_ACCOUNT_FILE {
         return true;
     }
     let parts: Vec<&str> = n.split('/').collect();
@@ -282,6 +283,13 @@ pub fn snapshot(root: &Path) -> Result<Vec<(String, String)>, String> {
     let config_path = root.join(CONFIG_FILE);
     if config_path.is_file() {
         files.push((CONFIG_FILE.to_string(), read_checked(root, CONFIG_FILE)?));
+    }
+    let account_path = root.join(SYNC_ACCOUNT_FILE);
+    let account_ok = fs::symlink_metadata(&account_path)
+        .map(|meta| meta.is_file() && !meta.file_type().is_symlink())
+        .unwrap_or(false);
+    if account_ok {
+        files.push((SYNC_ACCOUNT_FILE.to_string(), read_checked(root, SYNC_ACCOUNT_FILE)?));
     }
     let users_dir = root.join("users");
     let users_ok = fs::symlink_metadata(&users_dir)
@@ -602,6 +610,8 @@ mod tests {
     #[test]
     fn allows_user_workspace_and_rejects_traversal() {
         assert!(is_allowed_library_path("config.yaml"));
+        assert!(is_allowed_library_path("sync_account.json"));
+        assert!(!is_allowed_library_path("notes.json"));
         assert!(is_allowed_library_path("users/tong/set2.json"));
         assert!(!is_allowed_library_path("../config.yaml"));
         assert!(!is_allowed_library_path("users/../config.yaml"));

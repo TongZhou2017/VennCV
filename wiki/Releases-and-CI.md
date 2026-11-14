@@ -12,8 +12,8 @@
 3. **推荐**：推送与版本一致的 tag，例如：
 
    ```bash
-   git tag v0.8.10
-   git push origin v0.8.10
+   git tag v0.11.15
+   git push origin v0.11.15
    ```
 
 4. **或**：在 Actions 中手动运行 **Release Tauri**，填写标签名；可选择草稿 Release；若标签不存在会在当前提交创建。

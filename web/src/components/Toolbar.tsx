@@ -1,6 +1,29 @@
-import type { CSSProperties } from "react";
+import { useSyncExternalStore, type CSSProperties } from "react";
 import { useAppStore } from "../store/appStore";
+import {
+  getCloudPhase,
+  keepCloudLocal,
+  subscribeCloudPhase,
+  syncUserNow,
+  takeCloudCopy,
+  type CloudPhase,
+} from "../storage/userCloud";
 import { coerceAuthorDisplayMode } from "../types";
+
+function cloudPhaseLabel(phase: Exclude<CloudPhase, "off" | "conflict">): string {
+  switch (phase) {
+    case "syncing":
+      return "同步中";
+    case "synced":
+      return "已同步";
+    case "failed":
+      return "失败";
+    default: {
+      const unreachable: never = phase;
+      return unreachable;
+    }
+  }
+}
 
 type Props = {
   onImportClick: () => void;
@@ -43,6 +66,8 @@ export function Toolbar({
   const clearMultiProjectSelection = useAppStore((s) => s.clearMultiProjectSelection);
   const setProjectsCanvasHidden = useAppStore((s) => s.setProjectsCanvasHidden);
   const moveProjectsToTrash = useAppStore((s) => s.moveProjectsToTrash);
+  const showBannerNotice = useAppStore((s) => s.showBannerNotice);
+  const cloudPhase = useSyncExternalStore(subscribeCloudPhase, getCloudPhase);
 
   const btn: CSSProperties = {
     display: "inline-flex",
@@ -261,6 +286,47 @@ export function Toolbar({
         vizWorkspacePreview,
       )}
       <div style={{ flex: 1 }} />
+      {cloudPhase.phase === "off" ? null : (
+        <span style={{ display: "inline-flex", alignItems: "center", marginRight: 8 }} aria-live="polite">
+          {cloudPhase.phase === "conflict" ? (
+            <>
+              {textBtn("冲突", () => undefined, "冲突", cloudPhase.message, true)}
+              {textBtn(
+                "保留本机",
+                () => {
+                  if (!currentUsername) return;
+                  void keepCloudLocal(currentUsername).then((error) => {
+                    if (error) showBannerNotice(error, true);
+                  });
+                },
+                "保留本机",
+                "把云端这份记进版本，再上传本机",
+              )}
+              {textBtn(
+                "改用云端",
+                () => {
+                  if (!currentUsername) return;
+                  const error = takeCloudCopy(currentUsername);
+                  if (error) showBannerNotice(error, true);
+                },
+                "改用云端",
+                "用已经取回的云端副本替换本机",
+              )}
+            </>
+          ) : (
+            textBtn(
+              cloudPhaseLabel(cloudPhase.phase),
+              () => {
+                if (!currentUsername || cloudPhase.phase === "syncing") return;
+                void syncUserNow(currentUsername);
+              },
+              cloudPhaseLabel(cloudPhase.phase),
+              cloudPhase.message || "再同步一次",
+              cloudPhase.phase === "syncing",
+            )
+          )}
+        </span>
+      )}
       {iconBtn("退出登录", () => logout(), "🚪", "退出登录")}
     </header>
   );

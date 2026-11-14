@@ -2566,6 +2566,9 @@ impl VennCVApp {
                         self.data.relations.push(relation);
                     }
                 }
+                for (id, grant) in imported_data.grants {
+                    self.data.grants.insert(id, grant);
+                }
                 self.save_to_history();
             }
             Err(e) => {

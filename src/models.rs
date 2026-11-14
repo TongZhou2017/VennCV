@@ -66,6 +66,38 @@ pub struct SubmissionMilestone {
     pub note: String,
 }
 
+/// 一项资助。`number` 是基金号。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FundingAward {
+    #[serde(default)]
+    pub funder: String,
+    #[serde(default)]
+    pub number: String,
+}
+
+fn default_grant_phase() -> String {
+    "proposal".to_string()
+}
+
+/// 一项基金。结题按 `number` 对发表记录里的基金号。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Grant {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub number: String,
+    #[serde(default)]
+    pub funder: String,
+    /// `proposal` 申报、`active` 在研、`closed` 结题。
+    #[serde(default = "default_grant_phase")]
+    pub phase: String,
+    #[serde(default)]
+    pub representative_keys: Vec<String>,
+    #[serde(default)]
+    pub foundation_keys: Vec<String>,
+}
+
 /// 一次期刊投递或一条预印本。`url` 是对外展示版本。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JournalSubmission {
@@ -76,6 +108,12 @@ pub struct JournalSubmission {
     pub is_preprint: bool,
     #[serde(default)]
     pub url: String,
+    /// 文献类型。旧 JSON 缺省为空。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub article_type: String,
+    /// 基金号。旧 JSON 缺省为空。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub awards: Vec<FundingAward>,
     #[serde(default)]
     pub milestones: Vec<SubmissionMilestone>,
 }
@@ -160,6 +198,9 @@ pub struct ProgressBlock {
     pub completed_on: Option<String>,
     #[serde(default)]
     pub person_id: Option<String>,
+    /// 这项待办属于哪一项基金。旧 JSON 缺省为无。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
     #[serde(default)]
     pub note: String,
 }
@@ -197,14 +238,172 @@ fn default_lab_color() -> String {
     "#5c6bc0".to_string()
 }
 
-/// 实验室
+/// 实验室。名字是 PI，不是文章里的地址。中文名和英文名都留着，显示时优先中文名。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lab {
     pub id: String,
     #[serde(default)]
     pub name: String,
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub name_zh: String,
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub name_en: String,
     #[serde(default = "default_lab_color")]
     pub color: String,
+    /// 实验室自己添加的身份。和预设身份一样留着。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identities: Vec<String>,
+}
+
+/// 人在实验室里的身份。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LabStage {
+    Master,
+    Phd,
+    Postdoc,
+    Assistant,
+    Pi,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LabStageRecordDe {
+    #[serde(default)]
+    lab_id: String,
+    #[serde(default)]
+    stage: String,
+    #[serde(default)]
+    stages: Vec<String>,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    advisor_id: String,
+}
+
+/// 某人在某个实验室的身份。`stages` 可以同时有多项。`tags` 是实验室永久身份里被选中的那些。
+#[derive(Debug, Clone, Serialize)]
+pub struct LabStageRecord {
+    pub lab_id: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub stages: Vec<LabStage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub advisor_id: String,
+}
+
+fn parse_lab_stage(value: &str) -> Option<LabStage> {
+    match value {
+        "master" => Some(LabStage::Master),
+        "phd" => Some(LabStage::Phd),
+        "postdoc" => Some(LabStage::Postdoc),
+        "assistant" => Some(LabStage::Assistant),
+        "pi" => Some(LabStage::Pi),
+        _ => None,
+    }
+}
+
+fn stage_rank(stage: LabStage) -> usize {
+    match stage {
+        LabStage::Master => 0,
+        LabStage::Phd => 1,
+        LabStage::Postdoc => 2,
+        LabStage::Assistant => 3,
+        LabStage::Pi => 4,
+    }
+}
+
+/// 旧数据里的单个 `stage` 和现在的 `stages` 合并，并按预设顺序排。
+fn parse_lab_stages(stages: &[String], legacy: &str) -> Vec<LabStage> {
+    let mut found = Vec::new();
+    for item in stages.iter().map(String::as_str).chain(std::iter::once(legacy)) {
+        let Some(stage) = parse_lab_stage(item.trim()) else {
+            continue;
+        };
+        if !found.contains(&stage) {
+            found.push(stage);
+        }
+    }
+    found.sort_by_key(|stage| stage_rank(*stage));
+    found
+}
+
+fn trim_identity_tag(value: &str) -> String {
+    value.trim().chars().take(40).collect()
+}
+
+fn is_preset_identity(value: &str) -> bool {
+    matches!(value, "硕士生" | "博士生" | "博后" | "科研助理" | "PI" | "pi")
+}
+
+fn parse_identity_tags(tags: &[String], legacy: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in tags.iter().map(String::as_str).chain(std::iter::once(legacy)) {
+        let text = trim_identity_tag(item);
+        if text.is_empty() || is_preset_identity(&text) {
+            continue;
+        }
+        let key = text.to_lowercase();
+        if out.iter().any(|tag: &String| tag.to_lowercase() == key) {
+            continue;
+        }
+        out.push(text);
+        if out.len() >= 6 {
+            break;
+        }
+    }
+    out
+}
+
+fn parse_lab_roles(raw: Vec<LabStageRecordDe>) -> Vec<LabStageRecord> {
+    let mut out = Vec::new();
+    for item in raw {
+        let lab_id = item.lab_id.trim().to_string();
+        if lab_id.is_empty() || out.iter().any(|role: &LabStageRecord| role.lab_id == lab_id) {
+            continue;
+        }
+        let stage_text = item.stage.trim().to_string();
+        let stages = parse_lab_stages(&item.stages, &stage_text);
+        let legacy = if stage_text == "other" || stage_text.is_empty() {
+            item.note.as_str()
+        } else {
+            ""
+        };
+        let tags = parse_identity_tags(&item.tags, legacy);
+        let advisor_id = item.advisor_id.trim().chars().take(80).collect::<String>();
+        if stages.is_empty() && tags.is_empty() && advisor_id.is_empty() {
+            continue;
+        }
+        out.push(LabStageRecord {
+            lab_id,
+            stages,
+            tags,
+            advisor_id,
+        });
+        if out.len() >= 8 {
+            break;
+        }
+    }
+    out
+}
+
+fn deserialize_lab_roles<'de, D>(deserializer: D) -> Result<Vec<LabStageRecord>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Vec::<LabStageRecordDe>::deserialize(deserializer)?;
+    Ok(parse_lab_roles(raw))
+}
+
+/// 记在人身上的单位地址。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonAffiliation {
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub name_zh: String,
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub name_en: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -220,6 +419,34 @@ struct PersonDe {
     family_name: String,
     #[serde(default)]
     given_name: String,
+    #[serde(default)]
+    middle_name: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    affiliations: Vec<PersonAffiliation>,
+    #[serde(default, deserialize_with = "deserialize_lab_roles")]
+    lab_roles: Vec<LabStageRecord>,
+    #[serde(default)]
+    pi: bool,
+    #[serde(default)]
+    job: String,
+    #[serde(default)]
+    orcid: String,
+    #[serde(default)]
+    network_center: bool,
+    #[serde(default)]
+    network_x: Option<f64>,
+    #[serde(default)]
+    network_y: Option<f64>,
+}
+
+fn skip_empty_string(value: &str) -> bool {
+    value.is_empty()
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// 人物。不是登录账号。`lab_id` 是旧字段，读入后并入 `lab_ids`。
@@ -231,6 +458,28 @@ pub struct Person {
     pub lab_ids: Vec<String>,
     pub family_name: String,
     pub given_name: String,
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub middle_name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affiliations: Vec<PersonAffiliation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lab_roles: Vec<LabStageRecord>,
+    /// 这个人是 PI，但不必有自己的实验室。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pi: bool,
+    /// 职称，如教授、研究员。
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub job: String,
+    #[serde(default, skip_serializing_if = "skip_empty_string")]
+    pub orcid: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub network_center: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_y: Option<f64>,
 }
 
 impl From<PersonDe> for Person {
@@ -247,6 +496,20 @@ impl From<PersonDe> for Person {
             lab_ids,
             family_name: raw.family_name,
             given_name: raw.given_name,
+            middle_name: raw.middle_name,
+            aliases: raw.aliases,
+            affiliations: raw
+                .affiliations
+                .into_iter()
+                .filter(|item| !item.name_zh.is_empty() || !item.name_en.is_empty())
+                .collect(),
+            lab_roles: raw.lab_roles,
+            pi: raw.pi,
+            job: raw.job.trim().chars().take(40).collect(),
+            orcid: raw.orcid,
+            network_center: raw.network_center,
+            network_x: raw.network_x,
+            network_y: raw.network_y,
         }
     }
 }
@@ -268,6 +531,8 @@ pub struct ProjectAuthorship {
     pub primary: bool,
     #[serde(default)]
     pub responsibility: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "deserialize_lab_roles")]
+    pub paper_roles: Vec<LabStageRecord>,
 }
 
 /// 项目关系（箭头）
@@ -405,6 +670,9 @@ pub struct AppData {
     pub people: IndexMap<String, Person>,
     #[serde(default)]
     pub authorships: Vec<ProjectAuthorship>,
+    /// 基金。旧 JSON 缺省为空。
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub grants: IndexMap<String, Grant>,
 }
 
 impl Default for AppData {
@@ -493,6 +761,7 @@ impl Default for AppData {
             labs: IndexMap::new(),
             people: IndexMap::new(),
             authorships: Vec::new(),
+            grants: IndexMap::new(),
         }
     }
 }
@@ -509,6 +778,7 @@ impl AppData {
             labs: IndexMap::new(),
             people: IndexMap::new(),
             authorships: Vec::new(),
+            grants: IndexMap::new(),
         }
     }
 }

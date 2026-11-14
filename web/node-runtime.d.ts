@@ -12,8 +12,9 @@ declare namespace NodeJS {
 
 declare class Buffer {
   length: number;
-  toString(encoding: "utf8"): string;
+  toString(encoding: "utf8" | "base64"): string;
   static concat(list: Buffer[]): Buffer;
+  static from(value: string, encoding: "utf8"): Buffer;
   static byteLength(value: string, encoding: "utf8"): number;
 }
 
@@ -68,4 +69,24 @@ declare module "node:path" {
 
 declare module "node:url" {
   export function fileURLToPath(url: string): string;
+}
+
+declare module "node:https" {
+  interface IncomingMessage {
+    statusCode?: number;
+    headers?: Record<string, string | string[] | undefined>;
+    on(event: "data", listener: (chunk: Buffer) => void): void;
+    on(event: "end", listener: () => void): void;
+    on(event: "error", listener: (error: Error) => void): void;
+  }
+  interface ClientRequest {
+    on(event: "error", listener: (error: Error) => void): void;
+    write(body: string): void;
+    end(): void;
+  }
+  export function request(
+    url: string,
+    options: { method?: string; headers?: Record<string, string> },
+    callback: (response: IncomingMessage) => void,
+  ): ClientRequest;
 }

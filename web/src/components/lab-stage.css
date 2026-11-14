@@ -1,0 +1,148 @@
+.lab-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lab-stage-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lab-stage-choices button {
+  border: 1px solid #ddd4c8;
+  border-radius: 999px;
+  background: #fff;
+  color: #5c564e;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.lab-stage-choices button[aria-pressed="true"] {
+  border-color: #0f6e6e;
+  background: #0f6e6e;
+  color: #fff;
+}
+
+.lab-stage-choices button:focus-visible {
+  outline: 2px solid rgba(15, 110, 110, 0.35);
+  outline-offset: 2px;
+}
+
+.lab-stage-lock {
+  border: 1px solid #0f6e6e;
+  border-radius: 999px;
+  background: #0f6e6e;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.lab-stage-note {
+  margin: 0;
+  color: #8a8178;
+  font-size: 11px;
+}
+
+.lab-stage-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lab-stage-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #0f6e6e;
+  border-radius: 999px;
+  background: #fff;
+  color: #0f6e6e;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.lab-stage-add {
+  display: flex;
+  gap: 6px;
+}
+
+.lab-stage-add input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid #ddd4c8;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.lab-stage-add button {
+  border: 1px solid #ddd4c8;
+  border-radius: 999px;
+  background: #fff;
+  color: #5c564e;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.paper-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.paper-role {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #e4ddd3;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.paper-role-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paper-role-row strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.paper-role-row span {
+  color: #5c564e;
+  font-size: 12px;
+}
+
+.lab-stage-add select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid #ddd4c8;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.paper-role small {
+  color: #8a8178;
+  font-size: 11px;
+}

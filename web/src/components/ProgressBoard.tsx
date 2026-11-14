@@ -19,6 +19,7 @@ function compareBlocks(a: ProgressBlock, b: ProgressBlock, today: string): numbe
 export function ProgressBoard(props: { projectIds: string[]; mode: "all" | "selection" }) {
   const projects = useAppStore((s) => s.data.projects);
   const people = useAppStore((s) => s.data.people);
+  const grants = useAppStore((s) => s.data.grants ?? {});
   const selectProject = useAppStore((s) => s.selectProject);
   const today = todayIsoDate();
   const rows = props.projectIds
@@ -50,6 +51,8 @@ export function ProgressBoard(props: { projectIds: string[]; mode: "all" | "sele
             {blocks.map((block) => {
               const slot = slotsOf(project).find((item) => item.id === block.slot_id);
               const person = block.person_id ? people[block.person_id] : null;
+              const fund = block.grant_id ? grants[block.grant_id] : null;
+              const fundName = fund ? fund.name.trim() || fund.number || "未命名基金" : "";
               const mark = taskMark(block, today);
               const when = block.due ? `${block.date} → ${block.due}` : block.date;
               return (
@@ -61,7 +64,7 @@ export function ProgressBoard(props: { projectIds: string[]; mode: "all" | "sele
                 >
                   <span className="task-row-title">{block.title}</span>
                   <span className={`task-badge ${toneClass(mark.tone)}`}>{mark.text}</span>
-                  <span className="task-row-meta">{`${slot?.label ?? "未分区"} · ${person?.name || "未指定"}`}</span>
+                  <span className="task-row-meta">{`${slot?.label ?? "未分区"} · ${person?.name || "未指定"}${fundName ? ` · ${fundName}` : ""}`}</span>
                   <span className="task-row-meta">{when}</span>
                 </button>
               );

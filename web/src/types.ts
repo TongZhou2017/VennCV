@@ -37,9 +37,36 @@ export type AuthorNameStyle = "full" | "familyInitials" | "initialsFamily";
 
 export interface Lab {
   id: string;
+  /** 实验室显示名，用 PI 的名字。有中文名时用中文名。 */
   name: string;
+  /** PI 的中文名。 */
+  name_zh?: string;
+  /** PI 的英文名。 */
+  name_en?: string;
   /** `#rrggbb` */
   color: string;
+  /**
+   * 这个实验室自己添加的身份，和硕士生、博士生一样留着。
+   * 缺省表示还没整理过，读入时会从已经记下的身份补上。空数组表示整理过、目前没有额外身份。
+   */
+  identities?: string[];
+}
+
+/** 文章里认出的单位地址，记在人身上。中文和英文是同一条地址的两种写法。 */
+export interface PersonAffiliation {
+  name_zh?: string;
+  name_en?: string;
+}
+
+/** 人在一个实验室里的身份。实验室负责人自动是 PI，不在这张表里点。 */
+export type LabStage = "master" | "phd" | "postdoc" | "assistant" | "pi";
+
+/** 某人在某个实验室的身份。`stages` 可以同时有多项，例如硕博连读、博士后留任。`tags` 是这个实验室永久身份里被选中的那些。`advisor_id` 是这个实验室里带他的 PI。 */
+export interface LabStageRecord {
+  lab_id: string;
+  stages?: LabStage[];
+  tags?: string[];
+  advisor_id?: string;
 }
 
 export interface Person {
@@ -50,6 +77,25 @@ export interface Person {
   /** 缩写用。空则从姓名推断：空格前为姓，汉字则首字为姓 */
   family_name: string;
   given_name: string;
+  /** 英文名中姓和名之间的部分，如 James Dewey Watson 里的 Dewey。 */
+  middle_name?: string;
+  /** 同一人的其他写法，如中文名或期刊里的另一种顺序 */
+  aliases: string[];
+  /** 文章里的单位地址。不拿来当实验室。 */
+  affiliations?: PersonAffiliation[];
+  /** 现在在各实验室的身份。某篇投稿当时的身份记在那篇作者上。 */
+  lab_roles?: LabStageRecord[];
+  /** 这个人是 PI，但不必有自己的实验室。大实验室里的内部 PI 也记在这里。 */
+  pi?: boolean;
+  /** 职称，如教授、研究员。和在哪个实验室无关。 */
+  job?: string;
+  /** 有则用来认定是同一个人，不随期刊改名 */
+  orcid: string;
+  /** 合作网络的中心。缺省不是中心。 */
+  network_center?: boolean;
+  /** 合作网络里拖好的位置。缺省时按中心自动排列。 */
+  network_x?: number;
+  network_y?: number;
 }
 
 /** 人物在某个项目上的身份。以后的任务用 project_id + person_id 挂钩。 */
@@ -60,9 +106,13 @@ export interface ProjectAuthorship {
   position: number;
   corresponding: boolean;
   credit_roles: CreditRole[];
-  /** 为 true 时，维恩图「只显示主要作者」会贴出这个人 */
+  /** 共同第一或通讯作者。图上的「主要」还要这个人有未完成待办。 */
   primary: boolean;
+  /** 与其他人并列第一 */
+  co_first: boolean;
   responsibility: string;
+  /** 这篇投稿时，此人在各实验室的身份。 */
+  paper_roles?: LabStageRecord[];
 }
 
 export function coerceAuthorRole(raw: unknown): AuthorRole {
@@ -98,6 +148,31 @@ export interface SubmissionMilestone {
   note: string;
 }
 
+/** 一项资助。`number` 是基金号。 */
+export interface FundingAward {
+  funder: string;
+  number: string;
+}
+
+/** 基金所处阶段。 */
+export type GrantPhase = "proposal" | "active" | "closed";
+
+/**
+ * 一项基金。
+ * `representative_keys` 是申报代表作，最多五篇。
+ * `foundation_keys` 是项目基础相关成果。
+ * 键是 `项目 id/投稿 id`。结题按 `number` 对发表记录里的基金号。
+ */
+export interface Grant {
+  id: string;
+  name: string;
+  number: string;
+  funder: string;
+  phase: GrantPhase;
+  representative_keys: string[];
+  foundation_keys: string[];
+}
+
 /** 一次期刊投递，或一条预印本。预印本和最终发表都可以绑定对外展示版本的网址。 */
 export interface JournalSubmission {
   id: string;
@@ -106,6 +181,13 @@ export interface JournalSubmission {
   is_preprint: boolean;
   /** 对外展示版本 URL */
   url: string;
+  /**
+   * 文献类型。已知值如 `research-article`、`review`、`brief-report`。
+   * 认不出的写法按原文留下。旧数据缺省为空。
+   */
+  article_type?: string;
+  /** 基金号。旧数据缺省为空。 */
+  awards?: FundingAward[];
   milestones: SubmissionMilestone[];
 }
 
@@ -197,6 +279,8 @@ export interface ProgressBlock {
    */
   completed_on?: string | null;
   person_id: string | null;
+  /** 这项待办属于哪一项基金。旧数据缺省为空。 */
+  grant_id?: string | null;
   note: string;
 }
 
@@ -221,6 +305,8 @@ export interface AppDataJson {
   people: Record<string, Person>;
   /** 人物与项目的关联。回收站项目可以保留关联，但不进入合作网络。 */
   authorships: ProjectAuthorship[];
+  /** 基金。旧工作区缺省为空。 */
+  grants?: Record<string, Grant>;
   /** 回收站：已移出主列表的项目，可复原；键与 projects 不重复 */
   deleted_projects?: Record<string, Project>;
   /** 移入回收站时暂存的、涉及被删项目的连线，复原项目时写回 */

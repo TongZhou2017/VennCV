@@ -1,0 +1,56 @@
+.grant-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.grant-chip button {
+  padding: 8px 10px;
+  border: 1px solid #e4ddd4;
+  border-radius: 10px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grant-chip button:hover {
+  border-color: #0f6e6e;
+  color: #0f6e6e;
+}
+
+.grant-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.grant-pick button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #eee8e0;
+  border-radius: 10px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grant-pick button[aria-pressed="true"] {
+  border-color: #0f6e6e;
+  background: #f4fafa;
+}
+
+.grant-pick button:disabled {
+  color: #b7afa6;
+  cursor: not-allowed;
+}

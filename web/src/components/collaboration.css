@@ -81,6 +81,32 @@
   line-height: 1.5;
 }
 
+.collab-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+  font-size: 12px;
+  color: #6d645b;
+}
+
+.collab-tools button {
+  border: 1px solid #e4ddd4;
+  border-radius: 8px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.collab-tools button:disabled {
+  color: #b7afa6;
+  cursor: not-allowed;
+}
+
 .collab-legend {
   display: flex;
   flex-wrap: wrap;
@@ -107,8 +133,10 @@
   flex: 1;
   min-height: 0;
   width: 100%;
+  cursor: grab;
+  touch-action: none;
 }
 
 .collab-node {
-  cursor: pointer;
+  cursor: grab;
 }

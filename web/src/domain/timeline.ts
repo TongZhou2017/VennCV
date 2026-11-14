@@ -1,5 +1,6 @@
-import type { Project, ProjectStatus } from "../types";
-import { blocksOf, effectiveCompletion, projectThroughDate, slotsOf } from "./progress";
+import type { Grant, Project, ProjectStatus } from "../types";
+import { catalogWorks, grantPhaseLabel, publicationsForGrant } from "./grants";
+import { blocksForGrant, blocksOf, effectiveCompletion, projectThroughDate, slotsOf } from "./progress";
 import {
   milestoneDisplayLabel,
   parseIsoDate,
@@ -13,6 +14,10 @@ export interface TimelinePoint {
   detail: string;
   /** 总完成度在轨道里的上下位置。0 在下，100 在上。 */
   level: number | null;
+  projectId?: string;
+  blockId?: string;
+  /** 还没完成的待办。 */
+  muted?: boolean;
 }
 
 export interface TimelineTrack {
@@ -42,11 +47,30 @@ export interface TimelineUndated {
   expectedJournal: string;
 }
 
+export interface TimelineGrantLane {
+  grantId: string;
+  name: string;
+  phaseLabel: string;
+  tracks: TimelineTrack[];
+  points: TimelinePoint[];
+  sortDate: string;
+}
+
+export interface TimelineUndatedGrant {
+  grantId: string;
+  name: string;
+  phaseLabel: string;
+}
+
 export interface TimelineModel {
   lanes: TimelineLane[];
   undated: TimelineUndated[];
+  grantLanes: TimelineGrantLane[];
+  undatedGrants: TimelineUndatedGrant[];
   minDate: string | null;
   maxDate: string | null;
+  grantMinDate: string | null;
+  grantMaxDate: string | null;
 }
 
 function projectName(project: Project): string {
@@ -160,7 +184,80 @@ function laneFor(project: Project): TimelineLane | null {
   };
 }
 
-export function buildTimelineModel(projects: Record<string, Project>): TimelineModel {
+function grantName(grant: Grant): string {
+  return grant.name.trim() || grant.number.trim() || "未命名基金";
+}
+
+function tracksForGrant(grant: Grant, projects: Record<string, Project>, works: ReturnType<typeof catalogWorks>): TimelineTrack[] {
+  const tracks: TimelineTrack[] = [];
+  const todos = blocksForGrant(projects, grant.id);
+  if (todos.length > 0) {
+    tracks.push({
+      key: `${grant.id}:todos`,
+      label: "待办",
+      preprint: false,
+      url: "",
+      progress: false,
+      points: [...todos]
+        .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title, "zh"))
+        .map((todo) => ({
+          key: `${grant.id}:${todo.blockId}`,
+          date: todo.date,
+          title: todo.title,
+          detail: todo.projectName,
+          level: null,
+          projectId: todo.projectId,
+          blockId: todo.blockId,
+          muted: todo.completedOn === null,
+        })),
+    });
+  }
+  const papers = publicationsForGrant(grant.number, works)
+    .filter((work) => work.publishedOn)
+    .sort((a, b) => a.publishedOn.localeCompare(b.publishedOn) || a.projectName.localeCompare(b.projectName, "zh"));
+  if (papers.length > 0) {
+    tracks.push({
+      key: `${grant.id}:papers`,
+      label: "发表",
+      preprint: false,
+      url: "",
+      progress: false,
+      points: papers.map((work) => ({
+        key: `${grant.id}:${work.key}`,
+        date: work.publishedOn,
+        title: "发表",
+        detail: work.projectName,
+        level: null,
+        projectId: work.projectId,
+      })),
+    });
+  }
+  return tracks;
+}
+
+function grantLaneFor(
+  grant: Grant,
+  projects: Record<string, Project>,
+  works: ReturnType<typeof catalogWorks>,
+): TimelineGrantLane | null {
+  const tracks = tracksForGrant(grant, projects, works);
+  const points = tracks.flatMap((track) => track.points);
+  if (points.length === 0) return null;
+  const pointDates = points.map((point) => point.date).sort();
+  return {
+    grantId: grant.id,
+    name: grantName(grant),
+    phaseLabel: grantPhaseLabel(grant.phase),
+    tracks,
+    points,
+    sortDate: pointDates[0] ?? "9999-99-99",
+  };
+}
+
+export function buildTimelineModel(
+  projects: Record<string, Project>,
+  grants: Record<string, Grant> = {},
+): TimelineModel {
   const lanes: TimelineLane[] = [];
   const undated: TimelineUndated[] = [];
   for (const project of Object.values(projects)) {
@@ -180,13 +277,30 @@ export function buildTimelineModel(projects: Record<string, Project>): TimelineM
   }
   lanes.sort((a, b) => a.sortDate.localeCompare(b.sortDate) || a.name.localeCompare(b.name, "zh"));
   undated.sort((a, b) => a.name.localeCompare(b.name, "zh"));
-  const dates = lanes.flatMap((lane) => lane.points.map((point) => point.date));
-  dates.sort();
+  const works = catalogWorks({ projects });
+  const grantLanes: TimelineGrantLane[] = [];
+  const undatedGrants: TimelineUndatedGrant[] = [];
+  for (const grant of Object.values(grants)) {
+    const lane = grantLaneFor(grant, projects, works);
+    if (!lane) {
+      undatedGrants.push({ grantId: grant.id, name: grantName(grant), phaseLabel: grantPhaseLabel(grant.phase) });
+      continue;
+    }
+    grantLanes.push(lane);
+  }
+  grantLanes.sort((a, b) => a.sortDate.localeCompare(b.sortDate) || a.name.localeCompare(b.name, "zh"));
+  undatedGrants.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+  const dates = lanes.flatMap((lane) => lane.points.map((point) => point.date)).sort();
+  const grantDates = grantLanes.flatMap((lane) => lane.points.map((point) => point.date)).sort();
   return {
     lanes,
     undated,
+    grantLanes,
+    undatedGrants,
     minDate: dates[0] ?? null,
     maxDate: dates[dates.length - 1] ?? null,
+    grantMinDate: grantDates[0] ?? null,
+    grantMaxDate: grantDates[grantDates.length - 1] ?? null,
   };
 }
 

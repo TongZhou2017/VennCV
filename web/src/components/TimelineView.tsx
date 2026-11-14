@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store/appStore";
 import { projectStatusVisual } from "../types";
-import { buildTimelineModel, timelineAxisTicks, timelineDateRatio } from "../domain/timeline";
+import { buildTimelineModel, timelineAxisTicks, timelineDateRatio, type TimelinePoint } from "../domain/timeline";
 import { projectThroughDate } from "../domain/progress";
 import { ProgressMosaic } from "./ProgressMosaic";
 import "./timeline.css";
@@ -17,12 +17,26 @@ function progressDotTop(level: number): number {
 
 export function TimelineView() {
   const projects = useAppStore((s) => s.data.projects);
+  const grants = useAppStore((s) => s.data.grants ?? {});
   const selectedProjectId = useAppStore((s) => s.selectedProjectId);
   const selectProject = useAppStore((s) => s.selectProject);
-  const model = useMemo(() => buildTimelineModel(projects), [projects]);
+  const requestPropertyTab = useAppStore((s) => s.requestPropertyTab);
+  const model = useMemo(() => buildTimelineModel(projects, grants), [grants, projects]);
   const projectCount = Object.keys(projects).length;
+  const grantCount = Object.keys(grants).length;
 
-  if (projectCount === 0) {
+  const openPoint = (point: TimelinePoint) => {
+    if (!point.projectId) return;
+    if (point.blockId) {
+      selectProject(point.projectId, { blockId: point.blockId });
+      requestPropertyTab("tasks");
+      return;
+    }
+    selectProject(point.projectId);
+    requestPropertyTab("publication");
+  };
+
+  if (projectCount === 0 && grantCount === 0) {
     return (
       <div className="timeline-page">
         <p className="timeline-empty">当前工作区还没有项目</p>
@@ -32,18 +46,25 @@ export function TimelineView() {
 
   const minDate = model.minDate;
   const maxDate = model.maxDate;
+  const grantMin = model.grantMinDate;
+  const grantMax = model.grantMaxDate;
   const ticks = minDate && maxDate ? timelineAxisTicks(minDate, maxDate) : [];
-  const pointLeft = (date: string) => {
-    const ratio = timelineDateRatio(date, minDate ?? date, maxDate ?? date);
+  const grantTicks = grantMin && grantMax ? timelineAxisTicks(grantMin, grantMax) : [];
+  const place = (date: string, from: string | null, to: string | null) => {
+    const ratio = timelineDateRatio(date, from ?? date, to ?? date);
     return `calc(${TRACK_PAD}px + (100% - ${TRACK_PAD * 2}px) * ${ratio})`;
   };
+  const pointLeft = (date: string) => place(date, minDate, maxDate);
+  const grantLeft = (date: string) => place(date, grantMin, grantMax);
 
   return (
     <div className="timeline-page">
       <div className="timeline-scroll">
-        {model.lanes.length === 0 ? (
+        {model.lanes.length === 0 && model.grantLanes.length === 0 ? (
           <p className="timeline-empty">横轴上还没有日期。没有填写时间的项目列在下方。</p>
         ) : (
+          <>
+          {model.lanes.length > 0 ? (
           <div className="timeline-board">
             {ticks.length > 0 ? (
               <div className="timeline-axis">
@@ -180,11 +201,81 @@ export function TimelineView() {
               );
             })}
           </div>
+          ) : null}
+          {model.grantLanes.length > 0 ? (
+            <div className="timeline-board">
+            <h2 className="timeline-section">基金</h2>
+            {grantTicks.length > 0 ? (
+              <div className="timeline-axis">
+                {grantTicks.map((tick) => (
+                  <span key={tick} className="timeline-tick" style={{ left: grantLeft(tick) }}>
+                    {tick}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {model.grantLanes.map((lane) => (
+              <div key={lane.grantId} className="timeline-lane is-grant">
+                <span>
+                  <span className="timeline-lane-name">{lane.name}</span>
+                  <span className="timeline-lane-meta">{lane.phaseLabel}</span>
+                </span>
+                <span className="timeline-tracks">
+                  {lane.tracks.map((track) => (
+                    <span key={track.key} className="timeline-track">
+                      <span className="timeline-track-label">{track.label}</span>
+                      {track.points.length > 1 ? (
+                        <span
+                          className="timeline-line"
+                          style={{
+                            left: grantLeft(track.points[0].date),
+                            width: `calc((100% - ${TRACK_PAD * 2}px) * ${
+                              timelineDateRatio(
+                                track.points[track.points.length - 1].date,
+                                grantMin ?? track.points[track.points.length - 1].date,
+                                grantMax ?? track.points[track.points.length - 1].date,
+                              ) -
+                              timelineDateRatio(
+                                track.points[0].date,
+                                grantMin ?? track.points[0].date,
+                                grantMax ?? track.points[0].date,
+                              )
+                            })`,
+                          }}
+                        />
+                      ) : null}
+                      {track.points.map((point) => (
+                        <button
+                          key={point.key}
+                          type="button"
+                          className={point.muted ? "timeline-point is-muted" : "timeline-point"}
+                          style={{ left: grantLeft(point.date) }}
+                          onClick={() => openPoint(point)}
+                        >
+                          <span
+                            className="timeline-dot"
+                            style={{
+                              background: point.muted ? "#c5bfb8" : "#0f6e6e",
+                              borderColor: point.muted ? "#c5bfb8" : "#0f6e6e",
+                            }}
+                          />
+                          <span className="timeline-point-title">{point.title}</span>
+                          {point.detail ? <span className="timeline-point-detail">{point.detail}</span> : null}
+                        </button>
+                      ))}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ))}
+            </div>
+          ) : null}
+          </>
         )}
       </div>
-      {model.undated.length > 0 ? (
+      {model.undated.length > 0 || model.undatedGrants.length > 0 ? (
         <section className="timeline-undated" aria-label="未填写时间">
-          <h2>未填写时间</h2>
+          {model.undated.length > 0 ? <h2>未填写时间</h2> : null}
           <ul className="timeline-undated-list">
             {model.undated.map((item) => {
               const visual = projectStatusVisual(item.status);
@@ -207,6 +298,21 @@ export function TimelineView() {
               );
             })}
           </ul>
+          {model.undatedGrants.length > 0 ? (
+            <>
+              <h2>基金还没有日期</h2>
+              <ul className="timeline-undated-list">
+                {model.undatedGrants.map((item) => (
+                  <li key={item.grantId}>
+                    <span className="timeline-undated-item">
+                      {item.name}
+                      <span style={{ color: "#777" }}>{` · ${item.phaseLabel}`}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </section>
       ) : null}
     </div>

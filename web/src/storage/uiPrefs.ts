@@ -50,9 +50,11 @@ export function writeVisualizationRenderPrefsToStorage(prefs: VisualizationRende
 
 export function readAuthorDisplayFromStorage(): AuthorDisplayMode {
   try {
-    return coerceAuthorDisplayMode(globalThis.localStorage?.getItem(LS_AUTHOR_DISPLAY));
+    const stored = globalThis.localStorage?.getItem(LS_AUTHOR_DISPLAY);
+    if (!stored) return "primary";
+    return coerceAuthorDisplayMode(stored);
   } catch {
-    return "off";
+    return "primary";
   }
 }
 

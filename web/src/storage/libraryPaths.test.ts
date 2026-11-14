@@ -4,7 +4,9 @@ import { chooseWorkspaceFile, isAllowedLibraryPath } from "./libraryPaths";
 describe("library paths", () => {
   it("allows config and a user json file", () => {
     expect(isAllowedLibraryPath("config.yaml")).toBe(true);
+    expect(isAllowedLibraryPath("sync_account.json")).toBe(true);
     expect(isAllowedLibraryPath("users/tong/set2.json")).toBe(true);
+    expect(isAllowedLibraryPath("notes.json")).toBe(false);
   });
 
   it("rejects traversal and absolute paths", () => {
@@ -18,6 +20,8 @@ describe("library paths", () => {
   it("picks the only workspace file when workspace.json is absent", () => {
     expect(chooseWorkspaceFile(["set2.json", "version_store.json"])).toBe("set2.json");
     expect(chooseWorkspaceFile(["remember_login.json"])).toBe(null);
+    expect(chooseWorkspaceFile(["sync_account.json", "workspace.json"])).toBe("workspace.json");
+    expect(chooseWorkspaceFile(["cloud_upload.json", "sync_state.json", "workspace.json"])).toBe("workspace.json");
     expect(chooseWorkspaceFile(["set2.json", "remember_login.json"])).toBe("set2.json");
     expect(chooseWorkspaceFile(["set1.json", "set2.json"])).toBe(null);
     expect(chooseWorkspaceFile(["set1.json", "workspace.json"])).toBe("workspace.json");

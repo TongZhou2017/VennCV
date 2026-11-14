@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { platformLibraryRoot } from "./libraryRoots";
 import {
   CONFIG_FILE,
+  SYNC_ACCOUNT_FILENAME,
   isAllowedLibraryPath,
   isSafeJsonFilename,
   isSafeUsername,
@@ -118,6 +119,10 @@ export function readLibrarySnapshot(root: string): LibraryFile[] {
   const configPath = path.join(root, CONFIG_FILE);
   if (fs.existsSync(configPath) && fs.statSync(configPath).isFile()) {
     files.push({ path: CONFIG_FILE, contents: readChecked(root, CONFIG_FILE) });
+  }
+  const accountPath = path.join(root, SYNC_ACCOUNT_FILENAME);
+  if (fs.existsSync(accountPath) && fs.statSync(accountPath).isFile() && !fs.lstatSync(accountPath).isSymbolicLink()) {
+    files.push({ path: SYNC_ACCOUNT_FILENAME, contents: readChecked(root, SYNC_ACCOUNT_FILENAME) });
   }
   const usersDir = path.join(root, "users");
   if (!fs.existsSync(usersDir) || fs.lstatSync(usersDir).isSymbolicLink()) {

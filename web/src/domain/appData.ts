@@ -6,6 +6,7 @@ import {
   coerceRelationType,
 } from "../types";
 import { sanitizeAuthorsInPlace } from "./authors";
+import { sanitizeGrantsInPlace } from "./grants";
 import { sanitizeProjectProgress } from "./progress";
 import { sanitizeProjectTimes } from "./projectTime";
 
@@ -23,6 +24,7 @@ export function defaultEmptyAppData(): AppDataJson {
     labs: {},
     people: {},
     authorships: [],
+    grants: {},
   };
 }
 
@@ -59,9 +61,10 @@ function sanitizeProjectStatuses(projects: Record<string, Project>): void {
 
 function sanitizeProgressEverywhere(data: AppDataJson): void {
   const people = data.people ?? {};
-  for (const project of Object.values(data.projects)) sanitizeProjectProgress(project, people);
+  const grantIds = new Set(Object.keys(data.grants ?? {}));
+  for (const project of Object.values(data.projects)) sanitizeProjectProgress(project, people, grantIds);
   if (data.deleted_projects && typeof data.deleted_projects === "object") {
-    for (const project of Object.values(data.deleted_projects)) sanitizeProjectProgress(project, people);
+    for (const project of Object.values(data.deleted_projects)) sanitizeProjectProgress(project, people, grantIds);
   }
 }
 
@@ -83,6 +86,7 @@ export function sanitizeAppDataInPlace(d: AppDataJson): void {
   sanitizeProjectTimes(d.projects);
   sanitizeRelationTypes(d);
   sanitizeAuthorsInPlace(d);
+  sanitizeGrantsInPlace(d);
   sanitizeProgressEverywhere(d);
   if (d.deleted_projects && typeof d.deleted_projects === "object") {
     sanitizeProjectCompletion(d.deleted_projects);
@@ -105,6 +109,7 @@ export function cloneAppData(d: AppDataJson): AppDataJson {
   sanitizeProjectTimes(copy.projects);
   sanitizeRelationTypes(copy);
   sanitizeAuthorsInPlace(copy);
+  sanitizeGrantsInPlace(copy);
   sanitizeProgressEverywhere(copy);
   return copy;
 }
@@ -143,8 +148,10 @@ export function normalizeAppData(raw: unknown): AppDataJson {
     labs: j.labs ?? {},
     people: j.people ?? {},
     authorships: j.authorships ?? [],
+    grants: j.grants,
   };
   sanitizeAuthorsInPlace(data);
+  sanitizeGrantsInPlace(data);
   sanitizeProgressEverywhere(data);
   return data;
 }
@@ -187,7 +194,10 @@ export function mergeImportJson(current: AppDataJson, content: string): AppDataJ
     );
     if (!dup) next.authorships.push(link);
   }
+  next.grants = { ...(next.grants ?? {}), ...(imported.grants ?? {}) };
   sanitizeAuthorsInPlace(next);
+  sanitizeGrantsInPlace(next);
+  sanitizeProgressEverywhere(next);
   return next;
 }
 
@@ -222,5 +232,6 @@ export function appDataToExportJson(data: AppDataJson): string {
   if (Object.keys(data.labs).length > 0) payload.labs = data.labs;
   if (Object.keys(data.people).length > 0) payload.people = data.people;
   if (data.authorships.length > 0) payload.authorships = data.authorships;
+  if (data.grants && Object.keys(data.grants).length > 0) payload.grants = data.grants;
   return JSON.stringify(payload, null, 2);
 }

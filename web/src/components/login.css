@@ -46,6 +46,96 @@
   word-break: break-all;
 }
 
+.login-source {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.login-source button {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #ddd4c8;
+  background: rgba(255, 255, 255, 0.72);
+  color: #3d4a45;
+}
+
+.login-source button.is-selected {
+  border-color: #0f6e6e;
+  background: #0f6e6e;
+  color: #fff;
+}
+
+.login-cloud {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e4ddd3;
+  border-radius: 16px;
+}
+
+.login-cloud h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.login-cloud p {
+  margin: 0;
+  color: #5c564e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.login-cloud label {
+  display: block;
+  margin-bottom: 6px;
+  color: #6d645b;
+  font-size: 12px;
+}
+
+.login-cloud input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd4c8;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.login-cloud input:focus {
+  outline: 2px solid rgba(15, 110, 110, 0.35);
+  border-color: #0f6e6e;
+}
+
+.login-cloud .login-status-line {
+  color: #1c2430;
+}
+
+.login-cloud h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.login-cloud-users {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-cloud-users li {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #f4f1eb;
+  color: #1c2430;
+  font-size: 13px;
+}
+
 .login-library {
   margin-top: 18px;
   padding: 12px 14px;
@@ -150,6 +240,64 @@
   .login-library-add {
     grid-template-columns: 1fr;
   }
+}
+
+.login-user {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-cloud-toggle {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #ddd4c8;
+  border-radius: 999px;
+  background: #fff;
+  color: #8a8176;
+}
+
+.login-cloud-toggle[aria-pressed="true"] {
+  border-color: #0f6e6e;
+  background: #0f6e6e;
+  color: #fff;
+}
+
+.login-cloud-toggle:focus-visible {
+  outline: 2px solid rgba(15, 110, 110, 0.35);
+  outline-offset: 2px;
+}
+
+.login-user:has(.login-cloud-toggle) .login-card {
+  padding-right: 52px;
+}
+
+.login-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #3d4a45;
+  font-size: 13px;
+}
+
+.login-upload p {
+  flex-basis: 100%;
+  margin: 0;
+  color: #5c564e;
+  line-height: 1.45;
+}
+
+.login-upload .login-ghost {
+  height: 32px;
 }
 
 .login-grid {

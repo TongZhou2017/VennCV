@@ -128,7 +128,7 @@ npm run tauri:dev
 
 ## 版本与更新说明
 
-当前开发版本：**v0.8.10**（与 `web/package.json` 等处一致）。功能变更摘要见 **[CHANGELOG.md](CHANGELOG.md)**。  
+当前开发版本：**v0.11.15**（与 `web/package.json` 等处一致）。功能变更摘要见 **[CHANGELOG.md](CHANGELOG.md)**。  
 **尚无发行版时**，没有「安装包版本号」可对齐；以后若 Releases 提供安装包，请以发布页上的版本号为准。
 
 ---

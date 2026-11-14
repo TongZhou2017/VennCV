@@ -8,6 +8,7 @@ import { VisualizationCanvas } from "./VisualizationCanvas";
 import { TimelineView } from "./TimelineView";
 import { CollaborationView } from "./CollaborationView";
 import { ExportModal } from "./ExportModal";
+import { PersonLibrary } from "./PersonLibrary";
 import { SettingsModal } from "./SettingsModal";
 import { VersionHistoryModal } from "./VersionHistoryModal";
 import { readVisualizationRenderPrefsFromStorage } from "../storage/uiPrefs";
@@ -42,6 +43,8 @@ export function MainShell() {
   const clearStorageError = useAppStore((s) => s.clearStorageError);
   const bannerNotice = useAppStore((s) => s.bannerNotice);
   const leftSidebarOpen = useAppStore((s) => s.leftSidebarOpen);
+  const personLibraryOpen = useAppStore((s) => s.personLibraryOpen);
+  const setPersonLibraryOpen = useAppStore((s) => s.setPersonLibraryOpen);
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen);
   const vizWorkspacePreview = useAppStore((s) => s.vizWorkspacePreview);
   const workspaceView = useAppStore((s) => s.workspaceView);
@@ -308,6 +311,7 @@ export function MainShell() {
       </div>
       <ExportModal />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <PersonLibrary open={personLibraryOpen} onClose={() => setPersonLibraryOpen(false)} />
       <VersionHistoryModal open={versionsOpen} onClose={() => setVersionsOpen(false)} />
     </div>
   );

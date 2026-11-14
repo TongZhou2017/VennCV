@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriApp } from "../platform/tauri";
-import { VERSION_STORE_FILENAME, REMEMBER_LOGIN_FILENAME, isAllowedLibraryPath, isSafeJsonFilename } from "./libraryPaths";
+import { isAllowedLibraryPath, isReservedUserFile, isSafeJsonFilename, isSafeUsername } from "./libraryPaths";
 
 export type WriteStorageResult =
   | { ok: true }
@@ -234,17 +234,24 @@ export function listUserWorkspaceJsonFiles(username: string): string[] {
   for (const key of files.keys()) {
     if (!key.startsWith(prefix) || !key.endsWith(".json")) continue;
     const rest = key.slice(prefix.length);
-    if (
-      !rest ||
-      rest.includes("/") ||
-      rest === VERSION_STORE_FILENAME ||
-      rest === REMEMBER_LOGIN_FILENAME
-    ) {
-      continue;
-    }
+    if (!rest || rest.includes("/") || isReservedUserFile(rest)) continue;
     if (!isSafeJsonFilename(rest)) continue;
     out.push(key);
   }
   out.sort();
   return out;
+}
+
+export function listUserFileNames(username: string): string[] {
+  if (!isSafeUsername(username)) return [];
+  const prefix = `users/${username}/`;
+  const names: string[] = [];
+  for (const key of files.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    const rest = key.slice(prefix.length);
+    if (!rest || rest.includes("/") || !isSafeJsonFilename(rest)) continue;
+    names.push(rest);
+  }
+  names.sort();
+  return names;
 }

@@ -60,6 +60,16 @@
   width: 100%;
 }
 
+.timeline-section {
+  margin: 18px 8px 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.timeline-lane.is-grant {
+  cursor: default;
+}
+
 .timeline-lane.is-selected {
   border-color: #1976d2;
   box-shadow: 0 0 0 1px #1976d2 inset;
@@ -206,6 +216,15 @@
   flex-direction: column;
   align-items: center;
   min-width: 64px;
+}
+
+button.timeline-point {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
 .timeline-dot {

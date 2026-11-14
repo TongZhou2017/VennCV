@@ -1,4 +1,5 @@
 import type {
+  FundingAward,
   JournalSubmission,
   Project,
   ProjectStatus,
@@ -93,6 +94,186 @@ export function coerceSubmissionMilestoneKind(raw: unknown): SubmissionMilestone
   }
 }
 
+export const ARTICLE_TYPE_SLUGS = [
+  "research-article",
+  "review",
+  "systematic-review",
+  "meta-analysis",
+  "brief-report",
+  "letter",
+  "editorial",
+  "commentary",
+  "case-report",
+  "protocol",
+  "methods",
+  "clinical-trial",
+  "preprint",
+  "correction",
+  "retraction",
+  "news",
+  "book-chapter",
+  "proceedings",
+  "thesis",
+  "dataset",
+  "report",
+] as const;
+
+export type ArticleTypeSlug = (typeof ARTICLE_TYPE_SLUGS)[number];
+
+const ARTICLE_RANK: Record<ArticleTypeSlug, number> = {
+  "systematic-review": 1,
+  "meta-analysis": 2,
+  review: 3,
+  "case-report": 4,
+  "clinical-trial": 5,
+  protocol: 6,
+  methods: 7,
+  "brief-report": 8,
+  letter: 9,
+  editorial: 10,
+  commentary: 11,
+  correction: 12,
+  retraction: 13,
+  news: 14,
+  preprint: 15,
+  "book-chapter": 16,
+  proceedings: 17,
+  thesis: 18,
+  dataset: 19,
+  report: 20,
+  "research-article": 30,
+};
+
+const ARTICLE_ALIAS: Record<string, ArticleTypeSlug> = {
+  "research article": "research-article",
+  "original article": "research-article",
+  "original research": "research-article",
+  article: "research-article",
+  "review article": "review",
+  review: "review",
+  "systematic review": "systematic-review",
+  "meta analysis": "meta-analysis",
+  "brief report": "brief-report",
+  "short report": "brief-report",
+  letter: "letter",
+  editorial: "editorial",
+  commentary: "commentary",
+  comment: "commentary",
+  "case report": "case-report",
+  "case reports": "case-report",
+  protocol: "protocol",
+  methods: "methods",
+  "methods article": "methods",
+  "clinical trial": "clinical-trial",
+  preprint: "preprint",
+  "posted content": "preprint",
+  correction: "correction",
+  erratum: "correction",
+  retraction: "retraction",
+  news: "news",
+  "book chapter": "book-chapter",
+  chapter: "book-chapter",
+  proceedings: "proceedings",
+  "proceedings article": "proceedings",
+  "paper conference": "proceedings",
+  dissertation: "thesis",
+  thesis: "thesis",
+  dataset: "dataset",
+  report: "report",
+};
+
+function articleKey(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[_/]+/g, " ")
+    .replace(/-+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isArticleTypeSlug(value: string): value is ArticleTypeSlug {
+  return (ARTICLE_TYPE_SLUGS as readonly string[]).includes(value);
+}
+
+/** 把文献给出的类型收成固定写法。`journalArticleMeansResearch` 只用于 Europe PMC 那种「只有 Journal Article」的记录。 */
+export function articleTypeFromLabels(labels: string[], journalArticleMeansResearch = false): string {
+  const hits: { value: string; rank: number }[] = [];
+  let sawJournalArticle = false;
+  for (const label of labels) {
+    const key = articleKey(label);
+    if (!key || key.startsWith("research support") || key === "peer review") continue;
+    if (key === "journal article" || key === "article journal") {
+      sawJournalArticle = true;
+      continue;
+    }
+    const known = ARTICLE_ALIAS[key];
+    if (known) {
+      hits.push({ value: known, rank: ARTICLE_RANK[known] });
+      continue;
+    }
+    const phrase = label.trim().replace(/\s+/g, " ").slice(0, 40);
+    if (phrase) hits.push({ value: phrase, rank: 25 });
+  }
+  hits.sort((a, b) => a.rank - b.rank || a.value.localeCompare(b.value));
+  if (hits[0]) return hits[0].value;
+  if (journalArticleMeansResearch && sawJournalArticle) return "research-article";
+  return "";
+}
+
+export function articleTypeLabel(raw: string): string {
+  const text = raw.trim();
+  if (!isArticleTypeSlug(text)) return text.replace(/-/g, " ");
+  switch (text) {
+    case "research-article":
+      return "研究论文";
+    case "review":
+      return "综述";
+    case "systematic-review":
+      return "系统综述";
+    case "meta-analysis":
+      return "荟萃分析";
+    case "brief-report":
+      return "简报";
+    case "letter":
+      return "来信";
+    case "editorial":
+      return "述评";
+    case "commentary":
+      return "评论";
+    case "case-report":
+      return "病例报告";
+    case "protocol":
+      return "研究方案";
+    case "methods":
+      return "方法";
+    case "clinical-trial":
+      return "临床试验";
+    case "preprint":
+      return "预印本";
+    case "correction":
+      return "更正";
+    case "retraction":
+      return "撤稿";
+    case "news":
+      return "新闻";
+    case "book-chapter":
+      return "书章";
+    case "proceedings":
+      return "会议论文";
+    case "thesis":
+      return "学位论文";
+    case "dataset":
+      return "数据集";
+    case "report":
+      return "报告";
+    default: {
+      const unreachable: never = text;
+      return unreachable;
+    }
+  }
+}
+
 export function submissionMilestoneKindLabel(kind: SubmissionMilestoneKind): string {
   switch (kind) {
     case "SubmissionStart":
@@ -168,6 +349,29 @@ function sanitizeSubmissionUrl(raw: unknown): string {
   return raw.trim().slice(0, 2000);
 }
 
+function sanitizeArticleType(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.trim().replace(/\s+/g, " ").slice(0, 40);
+}
+
+function sanitizeAwards(raw: unknown): FundingAward[] {
+  if (!Array.isArray(raw)) return [];
+  const awards: FundingAward[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Partial<FundingAward>;
+    const funder = typeof row.funder === "string" ? row.funder.trim().replace(/\s+/g, " ").slice(0, 80) : "";
+    const number = typeof row.number === "string" ? row.number.trim().replace(/\s+/g, "").slice(0, 40) : "";
+    const key = number.toUpperCase();
+    if (!number || seen.has(key)) continue;
+    seen.add(key);
+    awards.push({ funder, number });
+    if (awards.length >= 16) break;
+  }
+  return awards;
+}
+
 function sanitizeJournalSubmission(raw: unknown, seenSubmissionIds: Set<string>, seenMilestoneIds: Set<string>): JournalSubmission | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Partial<JournalSubmission>;
@@ -179,6 +383,8 @@ function sanitizeJournalSubmission(raw: unknown, seenSubmissionIds: Set<string>,
     venue: typeof item.venue === "string" ? item.venue.trim() : "",
     is_preprint: item.is_preprint === true,
     url: sanitizeSubmissionUrl(item.url),
+    article_type: sanitizeArticleType(item.article_type),
+    awards: sanitizeAwards(item.awards),
     milestones: sanitizeMilestoneList(item.milestones, seenMilestoneIds),
   };
 }
@@ -208,6 +414,7 @@ export function sanitizeProjectTimes(projects: Record<string, Project>): void {
             venue: "",
             is_preprint: false,
             url: "",
+            article_type: "",
             milestones: looseMilestones,
           },
         ];

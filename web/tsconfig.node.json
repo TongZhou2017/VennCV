@@ -12,6 +12,7 @@
     "eslint.config.js",
     "node-runtime.d.ts",
     "vite-plugin-user-library.ts",
+    "vite-plugin-jianguoyun.ts",
     "user-library/nodeStore.ts"
   ]
 }

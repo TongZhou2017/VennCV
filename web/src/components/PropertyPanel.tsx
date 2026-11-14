@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useAppStore } from "../store/appStore";
+import { useAppStore, type PropertyPanelTab } from "../store/appStore";
 import type { ProjectStatus, RelationType } from "../types";
 import { PROJECT_STATUS_META, coerceProjectStatus, rgbaToCss } from "../types";
 import { effectiveCompletion, hasProgressBlocks } from "../domain/progress";
@@ -8,6 +8,7 @@ import { AuthorPanel } from "./AuthorPanel";
 import { ProgressEditor } from "./ProgressEditor";
 import { ProgressBoard } from "./ProgressBoard";
 import { FigurePlan } from "./FigurePlan";
+import { GrantView } from "./GrantView";
 import "./property-panel.css";
 
 const STATUSES: ProjectStatus[] = [
@@ -18,9 +19,9 @@ const STATUSES: ProjectStatus[] = [
   "ToBeStarted",
 ];
 
-type PropertyTab = "properties" | "tasks" | "publication" | "authors";
+type PropertyTab = PropertyPanelTab;
 
-const PROPERTY_TABS: PropertyTab[] = ["properties", "tasks", "publication", "authors"];
+const PROPERTY_TABS: PropertyTab[] = ["properties", "tasks", "publication", "authors", "grants"];
 
 function propertyTabLabel(tab: PropertyTab): string {
   switch (tab) {
@@ -32,6 +33,8 @@ function propertyTabLabel(tab: PropertyTab): string {
       return "发表";
     case "authors":
       return "作者";
+    case "grants":
+      return "基金";
     default: {
       const unexpected: never = tab;
       return unexpected;
@@ -164,10 +167,17 @@ export function PropertyPanel() {
   const [newRelIndirect, setNewRelIndirect] = useState(false);
   const [tab, setTab] = useState<PropertyTab>("properties");
   const selectedPersonId = useAppStore((s) => s.selectedPersonId);
+  const requestedPropertyTab = useAppStore((s) => s.requestedPropertyTab);
 
   useEffect(() => {
     if (selectedPersonId) setTab("authors");
   }, [selectedPersonId]);
+
+  useEffect(() => {
+    if (!requestedPropertyTab) return;
+    setTab(requestedPropertyTab);
+    useAppStore.setState({ requestedPropertyTab: null });
+  }, [requestedPropertyTab]);
 
   const relatedRelations = useMemo(() => {
     if (!selectedProjectId) return [];
@@ -201,7 +211,13 @@ export function PropertyPanel() {
     return (
       <PanelFrame
         tab={tab}
-        counts={{ properties: 0, tasks: taskCount(ids), publication: 0, authors: 0 }}
+        counts={{
+          properties: 0,
+          tasks: taskCount(ids),
+          publication: 0,
+          authors: 0,
+          grants: Object.keys(data.grants ?? {}).length,
+        }}
         onTab={setTab}
       >
         {(() => {
@@ -210,6 +226,8 @@ export function PropertyPanel() {
               return <AuthorPanel />;
             case "tasks":
               return <ProgressBoard projectIds={ids} mode="all" />;
+            case "grants":
+              return <GrantView />;
             case "properties":
             case "publication":
               return <p className="property-empty">选中画布或列表中的项目以编辑属性</p>;
@@ -230,6 +248,7 @@ export function PropertyPanel() {
     tasks: crossProjectIds ? taskCount(crossProjectIds) : (data.projects[selectedProjectId]?.progress_blocks?.length ?? 0),
     publication: buf.journal_submissions?.length ?? 0,
     authors: data.authorships.filter((link) => link.project_id === selectedProjectId).length,
+    grants: Object.keys(data.grants ?? {}).length,
   };
 
   const update = (patch: Partial<typeof buf>) => {
@@ -484,13 +503,15 @@ export function PropertyPanel() {
         );
       case "publication":
         return (
-          <>
+          <div className="task-page">
             <FigurePlan projectId={selectedProjectId} />
             <ProjectTimeFields project={buf} onChange={update} />
-          </>
+          </div>
         );
       case "authors":
         return <AuthorPanel />;
+      case "grants":
+        return <GrantView />;
       default: {
         const unexpected: never = tab;
         return unexpected;

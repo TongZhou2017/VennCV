@@ -404,6 +404,7 @@ export interface ProgressBlockPatch {
   due?: string | null;
   completed_on?: string | null;
   person_id?: string | null;
+  grant_id?: string | null;
   note?: string;
   slot_id?: string;
 }
@@ -415,6 +416,7 @@ export function addProgressBlock(
   date: string,
   due: string,
   personId: string | null,
+  grantId?: string | null,
 ): Project {
   if (!slotsOf(project).some((slot) => slot.id === slotId)) return project;
   const trimmed = title.trim().slice(0, 80);
@@ -431,6 +433,7 @@ export function addProgressBlock(
     person_id: personId && personId.trim() ? personId : null,
     note: "",
   };
+  if (grantId && grantId.trim()) block.grant_id = grantId.trim();
   return withBlocks(project, [...blocksOf(project), block], false);
 }
 
@@ -466,6 +469,10 @@ export function updateProgressBlock(project: Project, blockId: string, patch: Pr
     }
   }
   if (patch.person_id !== undefined) nextBlock.person_id = patch.person_id;
+  if (patch.grant_id !== undefined) {
+    if (patch.grant_id && patch.grant_id.trim()) nextBlock.grant_id = patch.grant_id.trim();
+    else delete nextBlock.grant_id;
+  }
   if (patch.note !== undefined) nextBlock.note = patch.note.trim().slice(0, 200);
   if (patch.slot_id !== undefined) {
     if (!slotsOf(project).some((slot) => slot.id === patch.slot_id)) return project;
@@ -478,6 +485,7 @@ export function updateProgressBlock(project: Project, blockId: string, patch: Pr
     (nextBlock.due ?? null) === (current.due ?? null) &&
     (nextBlock.completed_on ?? null) === (current.completed_on ?? null) &&
     nextBlock.person_id === current.person_id &&
+    (nextBlock.grant_id ?? null) === (current.grant_id ?? null) &&
     nextBlock.note === current.note &&
     nextBlock.slot_id === current.slot_id
   ) {
@@ -510,6 +518,42 @@ export interface PersonProgress {
   due: string | null;
   completedOn: string | null;
   completion: number;
+}
+
+export interface GrantTodo {
+  blockId: string;
+  projectId: string;
+  projectName: string;
+  title: string;
+  date: string;
+  due: string | null;
+  completedOn: string | null;
+}
+
+/** 挂在这项基金上的待办，未完成的排在前面。 */
+export function blocksForGrant(projects: Record<string, Project>, grantId: string): GrantTodo[] {
+  const rows: GrantTodo[] = [];
+  for (const project of Object.values(projects)) {
+    const slots = new Set(slotsOf(project).map((slot) => slot.id));
+    for (const block of blocksOf(project)) {
+      if (block.grant_id !== grantId || !slots.has(block.slot_id)) continue;
+      rows.push({
+        blockId: block.id,
+        projectId: project.id,
+        projectName: project.name.trim() || "未命名项目",
+        title: block.title,
+        date: block.date,
+        due: parseIsoDate(block.due),
+        completedOn: parseIsoDate(block.completed_on),
+      });
+    }
+  }
+  rows.sort((a, b) => {
+    const open = Number(a.completedOn !== null) - Number(b.completedOn !== null);
+    if (open !== 0) return open;
+    return a.date.localeCompare(b.date) || a.title.localeCompare(b.title, "zh");
+  });
+  return rows;
 }
 
 export function blocksForPerson(projects: Record<string, Project>, personId: string): PersonProgress[] {
@@ -791,7 +835,11 @@ function bandOf(raw: unknown): ProgressBand | null {
   }
 }
 
-export function sanitizeProjectProgress(project: Project, people: Record<string, Person>): void {
+export function sanitizeProjectProgress(
+  project: Project,
+  people: Record<string, Person>,
+  grantIds: Set<string>,
+): void {
   const rawSlots = Array.isArray(project.progress_slots) ? project.progress_slots : [];
   const slots: ProgressSlot[] = [];
   const seenSlots = new Set<string>();
@@ -828,6 +876,7 @@ export function sanitizeProjectProgress(project: Project, people: Record<string,
     const date = parseIsoDate(item.date);
     if (!title || !date) continue;
     const personId = typeof item.person_id === "string" && peopleIds.has(item.person_id) ? item.person_id : null;
+    const grantId = typeof item.grant_id === "string" && grantIds.has(item.grant_id) ? item.grant_id : null;
     const note = typeof item.note === "string" ? item.note.trim().slice(0, 200) : "";
     const due = parseIsoDate(item.due);
     const completedOn = Object.prototype.hasOwnProperty.call(item, "completed_on") ? parseIsoDate(item.completed_on) : date;
@@ -842,6 +891,7 @@ export function sanitizeProjectProgress(project: Project, people: Record<string,
       note,
     };
     if (due) block.due = due < date ? date : due;
+    if (grantId) block.grant_id = grantId;
     blocks.push(block);
   }
   project.progress_slots = slots;

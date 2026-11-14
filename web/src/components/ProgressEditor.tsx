@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store/appStore";
-import type { Person } from "../types";
+import type { Grant, Person, ProjectAuthorship } from "../types";
 import {
   addIsoDays,
   blocksOf,
@@ -21,8 +21,27 @@ import { DateField } from "./DateField";
 import { ProgressMosaic } from "./ProgressMosaic";
 import { ProgressLayout } from "./ProgressLayout";
 
-function peopleChoices(people: Record<string, Person>): Person[] {
-  return Object.values(people).sort((a, b) => a.name.localeCompare(b.name, "zh") || a.id.localeCompare(b.id));
+function grantChoices(grants: Record<string, Grant>): Grant[] {
+  return Object.values(grants).sort((a, b) => {
+    const left = a.name.trim() || a.number || a.id;
+    const right = b.name.trim() || b.number || b.id;
+    return left.localeCompare(right, "zh");
+  });
+}
+
+function grantLabel(grant: Grant): string {
+  return grant.name.trim() || grant.number || "未命名基金";
+}
+
+function projectAuthorChoices(
+  people: Record<string, Person>,
+  authorships: ProjectAuthorship[],
+  projectId: string,
+): Person[] {
+  return authorships
+    .filter((link) => link.project_id === projectId && people[link.person_id])
+    .sort((a, b) => a.position - b.position || a.person_id.localeCompare(b.person_id))
+    .map((link) => people[link.person_id]);
 }
 
 function PenIcon() {
@@ -53,6 +72,8 @@ function downloadText(filename: string, body: string) {
 export function ProgressEditor(props: { projectId: string }) {
   const project = useAppStore((s) => s.data.projects[props.projectId]);
   const people = useAppStore((s) => s.data.people);
+  const grants = useAppStore((s) => s.data.grants ?? {});
+  const authorships = useAppStore((s) => s.data.authorships);
   const applyTemplate = useAppStore((s) => s.applyProgressTemplate);
   const addBlock = useAppStore((s) => s.addProgressBlock);
   const updateBlock = useAppStore((s) => s.updateProgressBlock);
@@ -61,7 +82,8 @@ export function ProgressEditor(props: { projectId: string }) {
   const [draft, setDraft] = useState("");
   const [date, setDate] = useState(todayIsoDate());
   const [due, setDue] = useState(addIsoDays(todayIsoDate(), 7));
-  const [personId, setPersonId] = useState("");
+  const [personChoice, setPersonChoice] = useState<string | null>(null);
+  const [grantChoice, setGrantChoice] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [span, setSpan] = useState<ProgressReportSpan>("month");
   const [layoutOpen, setLayoutOpen] = useState(false);
@@ -101,13 +123,22 @@ export function ProgressEditor(props: { projectId: string }) {
   function setReportWindow(next: ProgressReportWindow | null) {
     setScope({ projectId: project!.id, window: next });
   }
-  const names = peopleChoices(people);
+  const authors = projectAuthorChoices(people, authorships, project.id);
+  const funds = grantChoices(grants);
+  const leadId =
+    authorships
+      .filter((link) => link.project_id === project.id && link.primary && people[link.person_id])
+      .sort((a, b) => a.position - b.position || a.person_id.localeCompare(b.person_id))[0]?.person_id ?? "";
+  const personId = personChoice ?? leadId;
+  const editAuthors = selected?.person_id && !authors.some((person) => person.id === selected.person_id) && people[selected.person_id]
+    ? [...authors, people[selected.person_id]]
+    : authors;
 
   function placeBlock() {
     if (!activeSlot || !date || !due) return;
     const title = draft.trim();
     if (!title) return;
-    addBlock(project!.id, activeSlot.id, title, date, due, personId || null);
+    addBlock(project!.id, activeSlot.id, title, date, due, personId || null, grantChoice || null);
     setDraft("");
     setCreating(false);
   }
@@ -160,13 +191,30 @@ export function ProgressEditor(props: { projectId: string }) {
             onChange={(event) => updateBlock(project.id, selected.id, { person_id: event.target.value || null })}
           >
             <option value="">未指定</option>
-            {names.map((person) => (
+            {editAuthors.map((person) => (
               <option key={person.id} value={person.id}>
                 {person.name}
               </option>
             ))}
           </select>
         </label>
+        {funds.length > 0 ? (
+          <label className="task-field">
+            <span>基金</span>
+            <select
+              aria-label="事项基金"
+              value={selected.grant_id ?? ""}
+              onChange={(event) => updateBlock(project.id, selected.id, { grant_id: event.target.value || null })}
+            >
+              <option value="">不指定</option>
+              {funds.map((grant) => (
+                <option key={grant.id} value={grant.id}>
+                  {grantLabel(grant)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="task-field">
           <span>开始</span>
           <DateField
@@ -312,15 +360,28 @@ export function ProgressEditor(props: { projectId: string }) {
                 </label>
                 <label className="task-field">
                   <span>人员</span>
-                  <select aria-label="人员" value={personId} onChange={(event) => setPersonId(event.target.value)}>
+                  <select aria-label="人员" value={personId} onChange={(event) => setPersonChoice(event.target.value)}>
                     <option value="">不指定</option>
-                    {names.map((person) => (
+                    {authors.map((person) => (
                       <option key={person.id} value={person.id}>
                         {person.name}
                       </option>
                     ))}
                   </select>
                 </label>
+                {funds.length > 0 ? (
+                  <label className="task-field">
+                    <span>基金</span>
+                    <select aria-label="新待办基金" value={grantChoice} onChange={(event) => setGrantChoice(event.target.value)}>
+                      <option value="">不指定</option>
+                      {funds.map((grant) => (
+                        <option key={grant.id} value={grant.id}>
+                          {grantLabel(grant)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <div className="task-field-pair">
                   <label className="task-field">
                     <span>开始</span>
@@ -408,6 +469,7 @@ export function ProgressEditor(props: { projectId: string }) {
                   <h4>{group.label}</h4>
                   {group.entries.map((entry) => {
                     const person = entry.block.person_id ? people[entry.block.person_id] : null;
+                    const fund = entry.block.grant_id ? grants[entry.block.grant_id] : null;
                     const mark = taskMark(entry.block, today);
                     const open = entry.block.id === selected?.id;
                     return (
@@ -425,7 +487,7 @@ export function ProgressEditor(props: { projectId: string }) {
                             <PenIcon />
                           </button>
                           <span className="task-row-meta">
-                            {`${entry.slot.label} · ${person?.name || "未指定"}`}
+                            {`${entry.slot.label} · ${person?.name || "未指定"}${fund ? ` · ${grantLabel(fund)}` : ""}`}
                           </span>
                           <span className="task-row-meta">
                             {entry.block.due ? `${entry.block.date} → ${entry.block.due}` : entry.block.date}

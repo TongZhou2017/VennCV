@@ -9,13 +9,21 @@ export function FigurePlan(props: { projectId: string }) {
   if (!project) return null;
   const figures = slotsOf(project).filter((slot) => slot.band === "figure");
   return (
-    <section className="figure-plan">
-      <h3>主图</h3>
-      <p className="property-note">
-        {`当前 ${figures.length} 张。主图默认整体占 30%。数量和主题写在这里，待办页往这些主图上放方块。`}
-      </p>
+    <section className="task-card">
+      <div className="task-card-head">
+        <h3>主图</h3>
+        <button
+          type="button"
+          className="task-text"
+          disabled={figures.length >= MAX_PROGRESS_FIGURES}
+          onClick={() => addFigure(project.id)}
+        >
+          添加
+        </button>
+      </div>
+      <p className="task-hint">{`当前 ${figures.length} 张。主图默认整体占 30%。待办页往这些主图上放方块。`}</p>
       {figures.map((slot) => (
-        <div key={slot.id} className="progress-slot-edit">
+        <div key={slot.id} className="pub-figure">
           <input
             aria-label={`${slot.label}的主题`}
             value={slot.label}
@@ -23,7 +31,7 @@ export function FigurePlan(props: { projectId: string }) {
           />
           <button
             type="button"
-            className="progress-remove"
+            className="task-icon"
             aria-label={`去掉${slot.label}`}
             onClick={() => removeFigure(project.id, slot.id)}
           >
@@ -31,9 +39,6 @@ export function FigurePlan(props: { projectId: string }) {
           </button>
         </div>
       ))}
-      <button type="button" disabled={figures.length >= MAX_PROGRESS_FIGURES} onClick={() => addFigure(project.id)}>
-        添加主图
-      </button>
     </section>
   );
 }

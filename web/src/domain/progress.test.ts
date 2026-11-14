@@ -5,6 +5,7 @@ import {
   addProgressBlock,
   addProgressFigure,
   applyProgressTemplate,
+  blocksForGrant,
   blocksForPerson,
   effectiveCompletion,
   houseBands,
@@ -312,7 +313,7 @@ describe("progress sanitizing", () => {
       },
       relations: [],
       people: {
-        person_1: { id: "person_1", name: "张三", lab_ids: [], family_name: "", given_name: "" },
+        person_1: { id: "person_1", name: "张三", lab_ids: [], family_name: "", given_name: "", aliases: [], orcid: "" },
       },
     });
     const saved = data.projects.p as Project & { progress_stages?: unknown };
@@ -333,6 +334,43 @@ describe("progress sanitizing", () => {
     ]);
     expect(saved.completion_percentage).toBe(3);
     expect(saved.status).toBe("ToBeStarted");
+  });
+
+  it("drops a todo's grant when that grant is no longer filed", () => {
+    const data = normalizeAppData({
+      fields: {},
+      projects: {
+        p: {
+          id: "p",
+          name: "P",
+          description: "",
+          status: "ToBeStarted",
+          field_ids: [],
+          position: [0, 0],
+          radius: 1,
+          completion_percentage: 0,
+          progress_slots: [{ id: "s1", band: "method", label: "方法", order: 0 }],
+          progress_blocks: [
+            { id: "b1", slot_id: "s1", title: "写结题", date: "2026-03-01", person_id: null, grant_id: "gone", note: "" },
+            { id: "b2", slot_id: "s1", title: "写申报", date: "2026-03-02", person_id: null, grant_id: "g1", note: "" },
+          ],
+        },
+      },
+      relations: [],
+      people: {},
+      grants: {
+        g1: {
+          id: "g1",
+          name: "面上",
+          number: "",
+          funder: "",
+          phase: "proposal",
+          representative_keys: [],
+          foundation_keys: [],
+        },
+      },
+    });
+    expect(data.projects.p?.progress_blocks?.map((block) => block.grant_id ?? "")).toEqual(["", "g1"]);
   });
 });
 
@@ -375,5 +413,49 @@ describe("progress on the timeline", () => {
       "2026-01-08 方法-数据 整理数据",
     ]);
     expect(rows[0]?.projectName).toBe("新项目");
+  });
+
+  it("keeps a grant's todos and funded papers on one timeline lane", () => {
+    let next = applyProgressTemplate(
+      project({
+        id: "p1",
+        name: "itol",
+        status: "Published",
+        journal_submissions: [
+          {
+            id: "journal",
+            venue: "Bioinformatics",
+            is_preprint: false,
+            url: "",
+            milestones: [{ id: "m1", kind: "Published", label: "", date: "2023-05-24", note: "" }],
+            awards: [{ funder: "国家自然科学基金", number: "41930533" }],
+          },
+        ],
+      }),
+    );
+    next = addProgressBlock(next, slotId(next, "方法-数据"), "写结题", "2026-03-01", "2026-03-08", null, "g1");
+    next = addProgressBlock(next, slotId(next, "方法-数据"), "别的事", "2026-04-01", "2026-04-08", null);
+    const rows = blocksForGrant({ p1: next }, "g1");
+    expect(rows.map((row) => row.title)).toEqual(["写结题"]);
+    const model = buildTimelineModel(
+      { p1: next },
+      {
+        g1: {
+          id: "g1",
+          name: "面上",
+          number: "41930533",
+          funder: "",
+          phase: "closed",
+          representative_keys: [],
+          foundation_keys: [],
+        },
+      },
+    );
+    const lane = model.grantLanes[0];
+    expect(lane?.name).toBe("面上");
+    expect(lane?.tracks.map((track) => track.label)).toEqual(["待办", "发表"]);
+    expect(lane?.tracks[0]?.points.map((point) => point.title)).toEqual(["写结题"]);
+    expect(lane?.tracks[0]?.points[0]?.muted).toBe(true);
+    expect(lane?.tracks[1]?.points.map((point) => `${point.date} ${point.detail}`)).toEqual(["2023-05-24 itol"]);
   });
 });

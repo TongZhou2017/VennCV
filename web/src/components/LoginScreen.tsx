@@ -9,9 +9,12 @@ import {
   switchUserLibrary,
   type LibraryChoice,
 } from "../storage/fs";
+import { loadSyncAccount } from "../storage/syncAccount";
 import { loadUserSummaries, type UserWorkspaceSummary } from "../storage/userSummary";
 import { PROJECT_STATUS_META } from "../types";
 import { createUserInConfig, useAppStore } from "../store/appStore";
+import { LoginCloudPanel } from "./LoginCloudPanel";
+import { LoginCloudUpload } from "./LoginCloudUpload";
 import "./login.css";
 
 const ACCENTS = ["#0f6e6e", "#1d4e89", "#8a4b2f", "#3d5a40", "#5c4d7a", "#0e7490"];
@@ -110,6 +113,9 @@ export function LoginScreen() {
   const [pathError, setPathError] = useState("");
   const [pendingCreate, setPendingCreate] = useState<string | null>(null);
   const [pathBusy, setPathBusy] = useState(false);
+  const [source, setSource] = useState<"local" | "cloud">("local");
+  const [cloudReady, setCloudReady] = useState(false);
+  const storage = getRuntimeStorageInfo();
 
   useEffect(() => {
     initAuth();
@@ -119,7 +125,11 @@ export function LoginScreen() {
     setCards(loadUserSummaries());
   }, [usersWithoutPassword]);
 
-  const storage = getRuntimeStorageInfo();
+  useEffect(() => {
+    const account = loadSyncAccount();
+    setCloudReady(Boolean(account.email && account.password));
+  }, [source, storage.dataDirectory, usersWithoutPassword]);
+
   const selected = cards.find((card) => card.username === loginUsername) ?? null;
   const selectedNeedsPassword = selected?.needsPassword ?? false;
 
@@ -181,7 +191,25 @@ export function LoginScreen() {
       <div className="login-inner">
         <p className="login-kicker">{storage.kind}</p>
         <h1>VennCV</h1>
-        <p className="login-lead">选择用户卡片。三天内记住过的用户可以直接进入，其他用户再输入密码。</p>
+        <p className="login-lead">先选择读取本机已有用户，或在这里设置坚果云。</p>
+        <div className="login-source" role="group" aria-label="数据来源">
+          <button
+            type="button"
+            className={source === "local" ? "is-selected" : ""}
+            aria-pressed={source === "local"}
+            onClick={() => setSource("local")}
+          >
+            读取本地
+          </button>
+          <button
+            type="button"
+            className={source === "cloud" ? "is-selected" : ""}
+            aria-pressed={source === "cloud"}
+            onClick={() => setSource("cloud")}
+          >
+            设置坚果云
+          </button>
+        </div>
         <div className="login-library">
           <div className="login-library-current">
             <span>用户数据路径</span>
@@ -279,22 +307,28 @@ export function LoginScreen() {
           ) : null}
         </div>
 
+        {source === "cloud" ? <LoginCloudPanel libraryKey={storage.dataDirectory} /> : null}
+
+        {source === "local" ? (
+        <>
         <div className="login-grid">
           {cards.map((card) => (
-            <UserCard
-              key={card.username}
-              card={card}
-              selected={card.username === loginUsername}
-              onSelect={(username) => {
-                const card = cards.find((item) => item.username === username);
-                setShowCreate(false);
-                if (card?.rememberedUntil) {
-                  loginWithRememberedSession(username);
-                  return;
-                }
-                if (username !== loginUsername) selectLoginUser(username);
-              }}
-            />
+            <div className="login-user" key={card.username}>
+              <UserCard
+                card={card}
+                selected={card.username === loginUsername}
+                onSelect={(username) => {
+                  const found = cards.find((item) => item.username === username);
+                  setShowCreate(false);
+                  if (found?.rememberedUntil) {
+                    loginWithRememberedSession(username);
+                    return;
+                  }
+                  if (username !== loginUsername) selectLoginUser(username);
+                }}
+              />
+              {cloudReady ? <LoginCloudUpload key={`${storage.dataDirectory}:${card.username}`} username={card.username} /> : null}
+            </div>
           ))}
           <button
             type="button"
@@ -402,6 +436,8 @@ export function LoginScreen() {
               </button>
             </div>
           </form>
+        ) : null}
+        </>
         ) : null}
       </div>
     </div>

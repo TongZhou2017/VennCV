@@ -27,6 +27,10 @@ describe("node user library", () => {
 
     expect(() => writeLibraryFile(dest, "../config.yaml", "nope")).toThrow(/不允许的路径/);
     expect(() => writeLibraryFile(dest, "users/tong/../../config.yaml", "nope")).toThrow(/不允许的路径/);
+
+    writeLibraryFile(dest, "sync_account.json", '{"email":"a@b.c","password":"saved","folder":"VennCV"}');
+    const withAccount = readLibrarySnapshot(dest).map((file) => file.path);
+    expect(withAccount).toContain("sync_account.json");
   });
 
   it("rejects a symlink inside the library", () => {

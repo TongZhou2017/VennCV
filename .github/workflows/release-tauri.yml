@@ -2,7 +2,7 @@
 #
 # 使用方式：
 # 1) 推荐：推送符合语义化版本的 tag（与 src-tauri/tauri.conf.json 中 version 一致），例如：
-#    git tag v0.8.10 && git push origin v0.8.10
+#    git tag v0.11.15 && git push origin v0.11.15
 # 2) 手动：Actions → Release Tauri → Run workflow，填写 tag（须与 tauri.conf 中 version 对齐），可选草稿 Release。
 #
 # 产物：macOS（Apple Silicon + Intel 各一份 dmg）、Windows（安装包）、Linux（deb 等，视 bundle 配置）。
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要关联的 Git 标签（例如 v0.8.10）；若尚不存在，将在此提交上创建"
+        description: "要关联的 Git 标签（例如 v0.11.15）；若尚不存在，将在此提交上创建"
         required: true
         type: string
       draft:

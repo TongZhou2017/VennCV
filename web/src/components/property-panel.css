@@ -105,6 +105,25 @@
   margin-bottom: 0;
 }
 
+.author-alias {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 6px 6px 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f4f1ec;
+  font-size: 12px;
+}
+
+.author-alias button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #6d645b;
+  cursor: pointer;
+}
+
 .author-field {
   display: flex;
   flex-direction: column;
@@ -388,6 +407,40 @@
   font-weight: 650;
 }
 
+.task-text:disabled {
+  color: #d9d3cb;
+  cursor: not-allowed;
+}
+
+.pub-add {
+  display: inline-block;
+  margin-top: 12px;
+}
+
+.pub-figure {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.pub-figure input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e4ddd4;
+  border-radius: 8px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 13px;
+}
+
+.pub-figure input:focus {
+  outline: 2px solid rgba(15, 110, 110, 0.35);
+  border-color: #0f6e6e;
+}
+
 .task-span {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -451,8 +504,36 @@
 }
 
 .task-icon:hover,
-.task-icon[aria-pressed="true"] {
+.task-icon[aria-pressed="true"],
+.task-icon[aria-expanded="true"] {
   background: #e7f3f3;
+  color: #0f6e6e;
+}
+
+.author-more {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.author-menu {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}
+
+.author-menu button {
+  padding: 4px 10px;
+  border: 1px solid #eee8e0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.author-menu button:hover {
+  border-color: #0f6e6e;
   color: #0f6e6e;
 }
 
@@ -571,4 +652,34 @@
 .progress-layout select {
   padding: 4px 6px;
   font-size: 12px;
+}
+
+.author-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.author-strip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #eee8e0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.author-strip button span {
+  color: #0f6e6e;
+  font-weight: 650;
+}
+
+.author-strip button.is-selected {
+  border-color: #0f6e6e;
+  background: #f4fafa;
 }

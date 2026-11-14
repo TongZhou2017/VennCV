@@ -37,6 +37,8 @@ import {
   updateProgressSlot as updateProgressSlotOnProject,
   type ProgressSlotPatch,
 } from "../domain/progress";
+import { applyDoiAuthors, type DoiCreator, type DoiPublicationFill } from "../domain/doiAuthors";
+import { newGrantId } from "../domain/grants";
 import {
   validateAndFixProjectPositions,
   validateAppDataPreserveUserLayout,
@@ -46,6 +48,9 @@ import type {
   AppDataJson,
   AppSettings,
   AuthorDisplayMode,
+  Grant,
+  GrantPhase,
+  LabStageRecord,
   Project,
   ProjectAuthorship,
   ProjectRelation,
@@ -67,11 +72,13 @@ import {
 } from "../storage/config";
 import type { WriteStorageResult } from "../storage/fs";
 import { existsStorage, readStorage, setStorageErrorSink, writeStorage } from "../storage/fs";
+import { queueCloudSync, setCloudSyncListener, startCloudCollab, stopCloudCollab } from "../storage/userCloud";
 import {
   clearRememberLogin,
   readRememberUntil,
   saveRememberLogin,
 } from "../storage/rememberLogin";
+import { revokeLabTabHandoff } from "../storage/labTabSession";
 import {
   appendSnapshot,
   deleteBranch,
@@ -88,7 +95,7 @@ import {
   writeAuthorDisplayToStorage,
   writeVisualizationRenderPrefsToStorage,
 } from "../storage/uiPrefs";
-import { nextCatalogId, nextLabColor } from "../domain/authors";
+import { mergePeopleInto, nextCatalogId, nextLabColor, normalizeIdentityCatalog, normalizeLabStageRecords, normalizePersonAffiliations, normalizePersonAliases, rememberPersonName } from "../domain/authors";
 
 let bannerNoticeToken = 0;
 
@@ -161,6 +168,8 @@ function pushHistorySlice(
 
 export type WorkspaceView = "venn" | "timeline" | "collaboration";
 
+export type PropertyPanelTab = "properties" | "tasks" | "publication" | "authors" | "grants";
+
 export interface AppState {
   isLoggedIn: boolean;
   currentUsername: string | null;
@@ -177,8 +186,10 @@ export interface AppState {
   settings: AppSettings;
 
   selectedProjectId: string | null;
-  /** 从总表或合作视图点开时，待办页展开这一条。 */
+  /** 从总表、合作视图或基金页点开时，待办页展开这一条。 */
   openedProgressBlockId: string | null;
+  /** 时间线或基金页点开一条之后，右侧栏切到这一页。 */
+  requestedPropertyTab: PropertyPanelTab | null;
   projectEditBuffer: Project | null;
   /** Shift+点击累加；用于批量隐藏、移入回收站等 */
   multiSelectedProjectIds: string[];
@@ -198,14 +209,16 @@ export interface AppState {
   rightSidebarOpen: boolean;
   /** 工作区预览：可视化以绝对定位铺满主内容区（非仅 flex 收栏） */
   vizWorkspacePreview: boolean;
-  /** 主内容区：维恩图、时间线或合作网络 */
+  /** 主内容区：维恩图、时间线或合作网络。基金在右侧标签页。 */
   workspaceView: WorkspaceView;
-  /** 维恩图人物球：不显示、只显示主要作者、显示全部。不写入工作区。 */
+  /** 维恩图人物球：不显示、只显示仍有未完成待办的共同第一和通讯作者、显示全部。缺省是前者。不写入工作区。 */
   authorDisplay: AuthorDisplayMode;
   setAuthorDisplay: (mode: AuthorDisplayMode) => void;
   /** 从维恩图或合作网络点中的人物 */
   selectedPersonId: string | null;
+  personLibraryOpen: boolean;
   selectPerson: (id: string | null) => void;
+  setPersonLibraryOpen: (open: boolean) => void;
   toggleLeftSidebar: () => void;
   toggleRightSidebar: () => void;
   setVizWorkspacePreview: (v: boolean) => void;
@@ -231,6 +244,8 @@ export interface AppState {
   loginRemember: boolean;
   setLoginRemember: (value: boolean) => void;
   loginWithRememberedSession: (username: string) => void;
+  /** 新标签页沿用刚才打开它的登录，不经过登录页，也不写入免密码登录。 */
+  enterKnownSession: (username: string) => void;
   submitLogin: () => void;
   logout: () => void;
 
@@ -256,6 +271,7 @@ export interface AppState {
   ) => void;
 
   selectProject: (id: string | null, opts?: { additive?: boolean; blockId?: string }) => void;
+  requestPropertyTab: (tab: PropertyPanelTab) => void;
   clearMultiProjectSelection: () => void;
   selectProjectsWithSameStatus: () => void;
   selectProjectsWithSameFieldSet: () => void;
@@ -303,21 +319,42 @@ export interface AppState {
   ensureGlobalRelationTag: (tag: string) => void;
 
   addLab: (name: string) => void;
-  updateLab: (id: string, patch: { name?: string; color?: string }) => void;
+  updateLab: (id: string, patch: { name?: string; name_zh?: string; name_en?: string; color?: string; identities?: string[] }) => void;
   removeLab: (id: string) => void;
   addPerson: (name: string, labIds: string[]) => string | null;
   updatePerson: (
     id: string,
-    patch: { name?: string; lab_ids?: string[]; family_name?: string; given_name?: string },
+    patch: {
+      name?: string;
+      lab_ids?: string[];
+      family_name?: string;
+      given_name?: string;
+      middle_name?: string;
+      aliases?: string[];
+      affiliations?: { name_zh?: string; name_en?: string }[];
+      lab_roles?: LabStageRecord[];
+      pi?: boolean;
+      job?: string;
+      network_center?: boolean;
+      network_x?: number | null;
+      network_y?: number | null;
+    },
   ) => void;
+  resetCollaborationPositions: () => void;
   removePerson: (id: string) => void;
+  mergePeople: (keepId: string, dropId: string) => void;
   addProjectAuthor: (projectId: string, personId: string) => void;
   updateProjectAuthor: (
     projectId: string,
     personId: string,
-    patch: Partial<Pick<ProjectAuthorship, "position" | "corresponding" | "credit_roles" | "primary" | "responsibility">>,
+    patch: Partial<Pick<ProjectAuthorship, "position" | "corresponding" | "credit_roles" | "co_first" | "responsibility" | "paper_roles">>,
   ) => void;
   removeProjectAuthor: (projectId: string, personId: string) => void;
+  fillProjectAuthors: (
+    projectId: string,
+    creators: DoiCreator[],
+    publication?: DoiPublicationFill,
+  ) => { created: number; attached: number; total: number; credited: number; dated: number; articleType: string; funded: number } | null;
   applyProgressTemplate: (projectId: string) => void;
   updateProgressSlot: (projectId: string, slotId: string, patch: ProgressSlotPatch) => void;
   addProgressFigure: (projectId: string) => void;
@@ -333,6 +370,7 @@ export interface AppState {
     date: string,
     due: string,
     personId: string | null,
+    grantId?: string | null,
   ) => void;
   updateProgressBlock: (
     projectId: string,
@@ -343,11 +381,18 @@ export interface AppState {
       due?: string | null;
       completed_on?: string | null;
       person_id?: string | null;
+      grant_id?: string | null;
       note?: string;
       slot_id?: string;
     },
   ) => void;
   removeProgressBlock: (projectId: string, blockId: string) => void;
+  addGrant: (seed?: { name?: string; number?: string; funder?: string; phase?: GrantPhase }) => string;
+  updateGrant: (
+    id: string,
+    patch: Partial<Pick<Grant, "name" | "number" | "funder" | "phase" | "representative_keys" | "foundation_keys">>,
+  ) => void;
+  removeGrant: (id: string) => void;
 }
 
 function writeProjectProgress(
@@ -403,6 +448,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectedProjectId: null,
   openedProgressBlockId: null,
+  requestedPropertyTab: null,
   projectEditBuffer: null,
   multiSelectedProjectIds: [],
   relationDraftFromId: null,
@@ -419,6 +465,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   workspaceView: "venn",
   authorDisplay: readAuthorDisplayFromStorage(),
   selectedPersonId: null,
+  personLibraryOpen: false,
 
   toggleLeftSidebar: () => set((s) => ({ leftSidebarOpen: !s.leftSidebarOpen })),
   toggleRightSidebar: () => set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
@@ -437,6 +484,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (id && !get().data.people[id]) return;
     set({ selectedPersonId: id });
   },
+  setPersonLibraryOpen: (open) => set({ personLibraryOpen: open }),
 
   exportModalBody: null,
   exportSuggestedName: "venncv_export.json",
@@ -489,6 +537,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       loginPassword: "",
     });
     get().loadWorkspaceForUser(username);
+    startCloudCollab(username);
+  },
+
+  enterKnownSession: (username) => {
+    if (!loadUserConfig().users.some((user) => user.username === username)) {
+      set({ loginError: "用户不存在" });
+      return;
+    }
+    set({
+      isLoggedIn: true,
+      currentUsername: username,
+      loginUsername: username,
+      loginError: "",
+      loginPassword: "",
+    });
+    get().loadWorkspaceForUser(username);
+    startCloudCollab(username);
   },
 
   submitLogin: () => {
@@ -526,11 +591,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       loginPassword: "",
     });
     get().loadWorkspaceForUser(username);
+    startCloudCollab(username);
   },
 
   logout: () => {
+    stopCloudCollab();
     const username = get().currentUsername;
     if (username) clearRememberLogin(username);
+    revokeLabTabHandoff(localStorage);
     bannerNoticeToken += 1;
     set({
       isLoggedIn: false,
@@ -541,6 +609,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       vizWorkspacePreview: false,
       workspaceView: "venn",
       selectedPersonId: null,
+      personLibraryOpen: false,
       selectedProjectId: null,
       openedProgressBlockId: null,
       projectEditBuffer: null,
@@ -623,6 +692,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
     set({ storageError: null });
+    queueCloudSync(currentUsername);
     return { ok: true as const };
   },
 
@@ -770,6 +840,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     get().saveWorkspace();
   },
+
+  requestPropertyTab: (tab) => set({ requestedPropertyTab: tab }),
 
   selectProject: (id, opts) => {
     const { data } = get();
@@ -1397,7 +1469,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!trimmed) return;
     const next = cloneAppData(get().data);
     const id = nextCatalogId("lab", next.labs);
-    next.labs[id] = { id, name: trimmed, color: nextLabColor(next.labs) };
+    const cjk = /[\u3400-\u9fff]/.test(trimmed);
+    next.labs[id] = {
+      id,
+      name: trimmed,
+      color: nextLabColor(next.labs),
+      ...(cjk ? { name_zh: trimmed } : { name_en: trimmed }),
+    };
     get().commitData(next);
   },
 
@@ -1410,7 +1488,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!trimmed) return;
       lab.name = trimmed;
     }
+    if (patch.name_zh !== undefined) {
+      const trimmed = patch.name_zh.trim().slice(0, 80);
+      if (trimmed) lab.name_zh = trimmed;
+      else delete lab.name_zh;
+    }
+    if (patch.name_en !== undefined) {
+      const trimmed = patch.name_en.trim().slice(0, 80);
+      if (trimmed) lab.name_en = trimmed;
+      else delete lab.name_en;
+    }
+    if (patch.name_zh !== undefined || patch.name_en !== undefined) {
+      const display = lab.name_zh || lab.name_en || "";
+      if (!display) return;
+      lab.name = display;
+    }
     if (patch.color !== undefined) lab.color = patch.color;
+    if (patch.identities !== undefined) lab.identities = normalizeIdentityCatalog(patch.identities);
     get().commitData(next);
   },
 
@@ -1435,6 +1529,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       lab_ids: labIds.filter((labId, index) => next.labs[labId] && labIds.indexOf(labId) === index),
       family_name: "",
       given_name: "",
+      aliases: [],
+      orcid: "",
     };
     get().commitData(next);
     return id;
@@ -1447,12 +1543,66 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (patch.name !== undefined) {
       const trimmed = patch.name.trim().slice(0, 80);
       if (!trimmed) return;
+      if (person.name !== trimmed) rememberPersonName(person, person.name);
       person.name = trimmed;
+      person.aliases = normalizePersonAliases(person.aliases, person.name);
+    }
+    if (patch.aliases !== undefined) person.aliases = normalizePersonAliases(patch.aliases, person.name);
+    if (patch.affiliations !== undefined) {
+      const affiliations = normalizePersonAffiliations(patch.affiliations);
+      if (affiliations.length > 0) person.affiliations = affiliations;
+      else delete person.affiliations;
     }
     if (patch.family_name !== undefined) person.family_name = patch.family_name.trim().slice(0, 40);
     if (patch.given_name !== undefined) person.given_name = patch.given_name.trim().slice(0, 40);
+    if (patch.middle_name !== undefined) {
+      const trimmed = patch.middle_name.trim().slice(0, 40);
+      if (trimmed) person.middle_name = trimmed;
+      else delete person.middle_name;
+    }
     if (patch.lab_ids !== undefined) {
       person.lab_ids = patch.lab_ids.filter((labId, index) => next.labs[labId] && patch.lab_ids?.indexOf(labId) === index);
+    }
+    if (patch.lab_roles !== undefined || patch.lab_ids !== undefined) {
+      const roles = normalizeLabStageRecords(
+        patch.lab_roles !== undefined ? patch.lab_roles : person.lab_roles,
+        new Set(person.lab_ids),
+      );
+      if (roles.length > 0) person.lab_roles = roles;
+      else delete person.lab_roles;
+    }
+    if (patch.pi !== undefined) {
+      if (patch.pi) person.pi = true;
+      else delete person.pi;
+    }
+    if (patch.job !== undefined) {
+      const job = patch.job.trim().slice(0, 40);
+      if (job) person.job = job;
+      else delete person.job;
+    }
+    if (patch.network_center !== undefined) {
+      if (patch.network_center) person.network_center = true;
+      else delete person.network_center;
+    }
+    if (patch.network_x !== undefined || patch.network_y !== undefined) {
+      const x = typeof patch.network_x === "number" && Number.isFinite(patch.network_x) ? Math.round(patch.network_x * 10) / 10 : null;
+      const y = typeof patch.network_y === "number" && Number.isFinite(patch.network_y) ? Math.round(patch.network_y * 10) / 10 : null;
+      if (x === null || y === null) {
+        delete person.network_x;
+        delete person.network_y;
+      } else {
+        person.network_x = x;
+        person.network_y = y;
+      }
+    }
+    get().commitData(next);
+  },
+
+  resetCollaborationPositions: () => {
+    const next = cloneAppData(get().data);
+    for (const person of Object.values(next.people)) {
+      delete person.network_x;
+      delete person.network_y;
     }
     get().commitData(next);
   },
@@ -1464,6 +1614,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     next.authorships = next.authorships.filter((link) => link.person_id !== id);
     get().commitData(next);
     if (get().selectedPersonId === id) set({ selectedPersonId: null });
+  },
+
+  mergePeople: (keepId, dropId) => {
+    const next = cloneAppData(get().data);
+    if (!mergePeopleInto(next, keepId, dropId)) return;
+    get().commitData(next);
+    if (get().selectedPersonId === dropId) set({ selectedPersonId: keepId });
   },
 
   addProjectAuthor: (projectId, personId) => {
@@ -1481,6 +1638,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       corresponding: false,
       credit_roles: [],
       primary: false,
+      co_first: false,
       responsibility: "",
     };
     next.authorships.push(link);
@@ -1497,8 +1655,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     if (patch.corresponding !== undefined) link.corresponding = patch.corresponding;
     if (patch.credit_roles !== undefined) link.credit_roles = patch.credit_roles;
-    if (patch.primary !== undefined) link.primary = patch.primary;
+    if (patch.co_first !== undefined) link.co_first = patch.co_first;
     if (patch.responsibility !== undefined) link.responsibility = patch.responsibility.trim().slice(0, 200);
+    if (patch.paper_roles !== undefined) {
+      const roles = normalizeLabStageRecords(patch.paper_roles, new Set(Object.keys(next.labs)));
+      if (roles.length > 0) link.paper_roles = roles;
+      else delete link.paper_roles;
+    }
     get().commitData(next);
   },
 
@@ -1508,6 +1671,55 @@ export const useAppStore = create<AppState>((set, get) => ({
       (link) => !(link.project_id === projectId && link.person_id === personId),
     );
     get().commitData(next);
+  },
+
+  fillProjectAuthors: (projectId, creators, publication) => {
+    const filled = applyDoiAuthors(get().data, projectId, creators, publication);
+    if (!filled) return null;
+    get().commitData(filled.data);
+    const saved = get().data.projects[projectId];
+    const buffer = get().projectEditBuffer;
+    if (saved && buffer && get().selectedProjectId === projectId) {
+      const savedSubs = saved.journal_submissions ?? [];
+      const bufferSubs = buffer.journal_submissions ?? [];
+      const savedIds = new Set(savedSubs.map((item) => item.id));
+      const merged = [
+        ...savedSubs.map((item) => {
+          const local = bufferSubs.find((one) => one.id === item.id);
+          const localAwards = local?.awards ?? [];
+          const savedAwards = item.awards ?? [];
+          const seenAwards = new Set(localAwards.map((award) => award.number.toUpperCase()));
+          return local
+            ? {
+                ...local,
+                milestones: item.milestones,
+                article_type: local.article_type?.trim() || item.article_type,
+                awards:
+                  localAwards.length === 0
+                    ? savedAwards
+                    : [...localAwards, ...savedAwards.filter((award) => !seenAwards.has(award.number.toUpperCase()))],
+              }
+            : item;
+        }),
+        ...bufferSubs.filter((item) => !savedIds.has(item.id)),
+      ];
+      set({
+        projectEditBuffer: {
+          ...buffer,
+          journal_submissions: merged,
+          submission_milestones: merged.flatMap((item) => item.milestones),
+        },
+      });
+    }
+    return {
+      created: filled.created,
+      attached: filled.attached,
+      total: filled.total,
+      credited: filled.credited,
+      dated: filled.dated,
+      articleType: filled.articleType,
+      funded: filled.funded,
+    };
   },
 
   applyProgressTemplate: (projectId) => {
@@ -1542,9 +1754,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     writeProjectProgress(get, set, projectId, (project) => setFigureShareOnProject(project, share));
   },
 
-  addProgressBlock: (projectId, slotId, title, date, due, personId) => {
+  addProgressBlock: (projectId, slotId, title, date, due, personId, grantId) => {
     writeProjectProgress(get, set, projectId, (project) =>
-      addProgressBlockToProject(project, slotId, title, date, due, personId),
+      addProgressBlockToProject(project, slotId, title, date, due, personId, grantId),
     );
   },
 
@@ -1555,10 +1767,57 @@ export const useAppStore = create<AppState>((set, get) => ({
   removeProgressBlock: (projectId, blockId) => {
     writeProjectProgress(get, set, projectId, (project) => removeProgressBlockFromProject(project, blockId));
   },
+
+  addGrant: (seed) => {
+    const next = cloneAppData(get().data);
+    const grants = next.grants ?? {};
+    const id = newGrantId();
+    grants[id] = {
+      id,
+      name: seed?.name?.trim() ?? "",
+      number: seed?.number?.trim() ?? "",
+      funder: seed?.funder?.trim() ?? "",
+      phase: seed?.phase ?? "proposal",
+      representative_keys: [],
+      foundation_keys: [],
+    };
+    next.grants = grants;
+    get().commitData(next);
+    return id;
+  },
+
+  updateGrant: (id, patch) => {
+    const next = cloneAppData(get().data);
+    const grant = next.grants?.[id];
+    if (!grant) return;
+    if (patch.name !== undefined) grant.name = patch.name;
+    if (patch.number !== undefined) grant.number = patch.number;
+    if (patch.funder !== undefined) grant.funder = patch.funder;
+    if (patch.phase !== undefined) grant.phase = patch.phase;
+    if (patch.representative_keys !== undefined) grant.representative_keys = patch.representative_keys;
+    if (patch.foundation_keys !== undefined) grant.foundation_keys = patch.foundation_keys;
+    get().commitData(next);
+  },
+
+  removeGrant: (id) => {
+    const next = cloneAppData(get().data);
+    if (!next.grants?.[id]) return;
+    delete next.grants[id];
+    get().commitData(next);
+  },
 }));
 
 setStorageErrorSink((message) => {
   useAppStore.setState({ storageError: message });
+});
+
+setCloudSyncListener((username, notice) => {
+  if (notice.downloaded && useAppStore.getState().currentUsername === username) {
+    useAppStore.getState().loadWorkspaceForUser(username);
+  }
+  if (notice.status === "conflict" || (notice.status === "failed" && notice.message)) {
+    useAppStore.getState().showBannerNotice(notice.message, true);
+  }
 });
 
 /** 创建用户（写入 config.yaml） */
