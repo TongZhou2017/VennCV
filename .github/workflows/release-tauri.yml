@@ -87,28 +87,6 @@ jobs:
           npm ci
           npm ci --prefix web
 
-      - name: Validate macOS signing and notarization secrets
-        if: matrix.platform == 'macos-latest'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          missing=0
-          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
-            if [ -z "${!var}" ]; then
-              echo "::error::Missing required secret: $var"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            echo "macOS 签名/公证 secrets 缺失，已阻止发布，避免产生“已损坏”安装包。"
-            exit 1
-          fi
-
       - name: Build and upload bundles
         uses: tauri-apps/tauri-action@v0
         env:
@@ -129,7 +107,7 @@ jobs:
           releaseBody: |
             安装包见下方 Assets。请下载对应系统文件：
 
-            - **macOS**：Apple Silicon 选 `aarch64`，Intel 选 `x86_64`（均为 `.dmg`）。
+            - **macOS**：Apple Silicon 选 `aarch64`，Intel 选 `x86_64`（均为 `.dmg`）。未签名时，访达里按住 Control 点按应用，选择「打开」。
             - **Windows**：`.exe` / `.msi`（以构建产物为准）。
             - **Linux**：`.deb` / AppImage 等（以构建产物为准）。
 
