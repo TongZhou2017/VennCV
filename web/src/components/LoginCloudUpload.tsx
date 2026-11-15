@@ -6,7 +6,7 @@ import {
   syncUserNow,
 } from "../storage/userCloud";
 
-export function LoginCloudUpload({ username }: { username: string }) {
+export function LoginCloudUpload({ username, onSynced }: { username: string; onSynced?: () => void }) {
   const [enabled, setEnabled] = useState(() => cloudUploadEnabled(username));
   const [note, setNote] = useState(() => cloudSyncSummary(username));
   const [busy, setBusy] = useState(false);
@@ -27,6 +27,7 @@ export function LoginCloudUpload({ username }: { username: string }) {
     const result = await syncUserNow(username);
     setBusy(false);
     setNote(result.message);
+    if (result.ok) onSynced?.();
   }
 
   return (

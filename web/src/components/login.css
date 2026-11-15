@@ -129,11 +129,36 @@
 }
 
 .login-cloud-users li {
-  padding: 6px 12px;
   border-radius: 999px;
   background: #f4f1eb;
   color: #1c2430;
   font-size: 13px;
+}
+
+.login-cloud-users label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 12px;
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.login-cloud-users input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.login-cloud-users label:has(input:checked) {
+  color: #0f6e6e;
+}
+
+.login-cloud-user-note {
+  color: #6d645b;
+  font-size: 12px;
 }
 
 .login-library {

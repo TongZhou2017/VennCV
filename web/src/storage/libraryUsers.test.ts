@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeDiscoveredUsers } from "./libraryUsers";
+import { mergeCloudUsernames, mergeDiscoveredUsers } from "./libraryUsers";
 import type { UserConfig } from "../types";
 
 const baseConfig: UserConfig = {
@@ -45,5 +45,21 @@ describe("mergeDiscoveredUsers", () => {
     );
     expect(merged.changed).toBe(false);
     expect(merged.config.users[0].last_edited_file).toBe("users/tong/set2.json");
+  });
+});
+
+describe("mergeCloudUsernames", () => {
+  it("adds a remote user that is not on this computer yet", () => {
+    const merged = mergeCloudUsernames(baseConfig, ["tong", "admin", "用户", "../x"]);
+    expect(merged.changed).toBe(true);
+    const tong = merged.config.users.find((user) => user.username === "tong");
+    expect(tong?.password_hash).toBe("");
+    expect(tong?.data_storage_path).toBe("users/tong");
+    expect(merged.config.users.filter((user) => user.username === "admin")).toHaveLength(1);
+  });
+
+  it("leaves the account list alone when every remote user is already local", () => {
+    const merged = mergeCloudUsernames(baseConfig, ["admin"]);
+    expect(merged.changed).toBe(false);
   });
 });

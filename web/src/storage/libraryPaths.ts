@@ -67,6 +67,25 @@ export function cloudUploadNames(filenames: string[]): string[] {
   return filenames.filter((name) => isCloudDataFilename(name));
 }
 
+/**
+ * 当前工作区文件还在就不动。
+ * 不在时改到唯一的那份工作区；有多份且没有 workspace.json 时不猜。
+ */
+export function preferredWorkspaceFile(current: string | null | undefined, filenames: string[]): string | null {
+  const currentName = (current ?? "").split("/").filter(Boolean).pop() ?? "";
+  if (
+    currentName &&
+    filenames.includes(currentName) &&
+    isCloudDataFilename(currentName) &&
+    !isReservedUserFile(currentName)
+  ) {
+    return null;
+  }
+  const chosen = chooseWorkspaceFile(filenames);
+  if (!chosen || chosen === currentName) return null;
+  return chosen;
+}
+
 /** 多个工作区时优先 workspace.json；只有一个数据文件时用那一个。 */
 export function chooseWorkspaceFile(filenames: string[]): string | null {
   const files = filenames.filter(

@@ -54,3 +54,25 @@ export function mergeDiscoveredUsers(
   }
   return { config: { users }, changed };
 }
+
+/** 把坚果云上已有、本机账号表还没有的用户登记进来。密码留空，登录时再设。 */
+export function mergeCloudUsernames(
+  config: UserConfig,
+  names: string[],
+): { config: UserConfig; changed: boolean } {
+  let changed = false;
+  const users: UserConfigEntry[] = config.users.map((user) => ({ ...user }));
+  for (const raw of names) {
+    const username = raw.trim();
+    if (!isSafeUsername(username)) continue;
+    if (users.some((user) => user.username === username)) continue;
+    users.push({
+      username,
+      password_hash: "",
+      data_storage_path: `users/${username}`,
+      last_edited_file: null,
+    });
+    changed = true;
+  }
+  return { config: { users }, changed };
+}

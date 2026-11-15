@@ -2,6 +2,8 @@ import { normalizeAppData } from "../domain/appData";
 import type { SyncBase } from "../domain/cloudSync";
 import { syncAccountError } from "../domain/nutstore";
 import { syncNutstoreUser } from "./nutstoreClient";
+import { loadUserConfig, saveUserConfig, setUserLastEditedFile } from "./config";
+import { mergeCloudUsernames } from "./libraryUsers";
 import { listUserFileNames, readStorage, writeStorage } from "./fs";
 import {
   CLOUD_CONFLICT_FILENAME,
@@ -10,6 +12,7 @@ import {
   SYNC_STATE_FILENAME,
   isCloudDataFilename,
   isSafeUsername,
+  preferredWorkspaceFile,
 } from "./libraryPaths";
 import { loadSyncAccount } from "./syncAccount";
 import { appendSnapshot, loadVersionStore, persistVersionStore } from "./versionStore";
@@ -134,6 +137,33 @@ function writeBaseFiles(username: string, files: Record<string, string>): string
   }
   const written = writeStorage(path, JSON.stringify({ files: ordered }));
   return written.ok ? null : written.message;
+}
+
+/** 下载下来的工作区如果不是 workspace.json，就把登录卡片指到那一份。 */
+export function attachWorkspacePointer(username: string): boolean {
+  if (!isSafeUsername(username)) return false;
+  const entry = loadUserConfig().users.find((user) => user.username === username);
+  if (!entry) return false;
+  const chosen = preferredWorkspaceFile(entry.last_edited_file, listUserFileNames(username));
+  if (!chosen) return false;
+  const written = setUserLastEditedFile(username, `users/${username}/${chosen}`);
+  return written.ok;
+}
+
+/** 把选中的坚果云用户登记到本机并下载工作区。还没有的用户密码留空。 */
+export async function importRemoteUser(
+  username: string,
+): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  if (!isSafeUsername(username)) return { ok: false, message: "用户名无效" };
+  const merged = mergeCloudUsernames(loadUserConfig(), [username]);
+  if (merged.changed) {
+    const written = saveUserConfig(merged.config);
+    if (!written.ok) return { ok: false, message: written.message };
+  }
+  const result = await syncUserNow(username);
+  if (!result.ok) return { ok: false, message: result.message };
+  attachWorkspacePointer(username);
+  return { ok: true, message: result.message };
 }
 
 export function cloudSyncSummary(username: string): string {
@@ -269,6 +299,7 @@ async function performSync(username: string): Promise<CloudSyncNotice> {
           JSON.stringify({ generation: result.generation, files: result.files, status: "synced" }),
         );
         if (!state.ok) return finish({ ok: false, status: "failed", message: state.message, downloaded: false });
+        attachWorkspacePointer(username);
         return finish({
           ok: true,
           status: "synced",

@@ -130,6 +130,11 @@ export function LoginScreen() {
     setCloudReady(Boolean(account.email && account.password));
   }, [source, storage.dataDirectory, usersWithoutPassword]);
 
+  useEffect(() => {
+    if (source !== "local") return;
+    setCards(loadUserSummaries());
+  }, [source, storage.dataDirectory]);
+
   const selected = cards.find((card) => card.username === loginUsername) ?? null;
   const selectedNeedsPassword = selected?.needsPassword ?? false;
 
@@ -307,7 +312,15 @@ export function LoginScreen() {
           ) : null}
         </div>
 
-        {source === "cloud" ? <LoginCloudPanel libraryKey={storage.dataDirectory} /> : null}
+        {source === "cloud" ? (
+          <LoginCloudPanel
+            libraryKey={storage.dataDirectory}
+            onImported={() => {
+              initAuth();
+              setCards(loadUserSummaries());
+            }}
+          />
+        ) : null}
 
         {source === "local" ? (
         <>
@@ -327,7 +340,13 @@ export function LoginScreen() {
                   if (username !== loginUsername) selectLoginUser(username);
                 }}
               />
-              {cloudReady ? <LoginCloudUpload key={`${storage.dataDirectory}:${card.username}`} username={card.username} /> : null}
+              {cloudReady ? (
+                <LoginCloudUpload
+                  key={`${storage.dataDirectory}:${card.username}`}
+                  username={card.username}
+                  onSynced={() => setCards(loadUserSummaries())}
+                />
+              ) : null}
             </div>
           ))}
           <button

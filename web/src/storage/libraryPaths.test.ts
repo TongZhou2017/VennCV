@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseWorkspaceFile, isAllowedLibraryPath } from "./libraryPaths";
+import { chooseWorkspaceFile, isAllowedLibraryPath, preferredWorkspaceFile } from "./libraryPaths";
 
 describe("library paths", () => {
   it("allows config and a user json file", () => {
@@ -25,5 +25,11 @@ describe("library paths", () => {
     expect(chooseWorkspaceFile(["set2.json", "remember_login.json"])).toBe("set2.json");
     expect(chooseWorkspaceFile(["set1.json", "set2.json"])).toBe(null);
     expect(chooseWorkspaceFile(["set1.json", "workspace.json"])).toBe("workspace.json");
+  });
+
+  it("points a new computer at the workspace that actually exists", () => {
+    expect(preferredWorkspaceFile(null, ["set2.json", "version_store.json", "sync.json"])).toBe("set2.json");
+    expect(preferredWorkspaceFile("users/tong/set2.json", ["set2.json", "version_store.json"])).toBe(null);
+    expect(preferredWorkspaceFile("users/tong/workspace.json", ["set2.json"])).toBe("set2.json");
   });
 });
